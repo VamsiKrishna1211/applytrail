@@ -23,6 +23,7 @@ servers:
 
 security:
   - bearerAuth: []
+  - apiKeyAuth: []
 
 tags:
   - name: dedupe
@@ -526,6 +527,15 @@ components:
       description: |
         An ApplyTrail API key, `at_live_...`. Scopes are `read`, `write`, and
         `admin`; `admin` implies the others.
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+      description: |
+        The same API key, carried as a bare token with no scheme. This exists
+        for clients that reserve `Authorization` for their own OAuth token and
+        will not let a user set it. `Authorization` takes precedence when both
+        are present, so a stale value here cannot shadow an explicit one.
 
   responses:
     BadRequest:

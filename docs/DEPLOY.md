@@ -19,14 +19,24 @@ only, with no long-lived process, which is awkward for connection pooling.
 
 ### Steps
 
-1. **Create a Neon project** and copy the pooled connection string.
+Everything below is free-tier. Substitute your own project id and region; the
+examples use `us-east5`, which is the closest Cloud Run region to Neon's
+`aws-us-east-2`.
+
+1. **Create a Neon project.** Copy both connection strings: the pooled one for
+   the service, the direct one for migrations.
 
 2. **Migrate**, from your laptop:
 
    ```bash
-   APPLYTRAIL_DATABASE_URL="postgres://...neon.tech/applytrail?sslmode=require" \
+   APPLYTRAIL_DATABASE_URL="postgres://...neon.tech/neondb?sslmode=verify-full" \
      go run ./cmd/applytrail migrate up
    ```
+
+   Prefer `sslmode=verify-full` over `require`. `require` encrypts but does not
+   check the server certificate, which leaves the connection open to an active
+   attacker; `verify-full` validates the chain and hostname against the system
+   roots, and Neon presents a publicly trusted certificate.
 
 3. **Bootstrap** the tenant and an admin key. The key is printed once:
 
@@ -34,31 +44,88 @@ only, with no long-lived process, which is awkward for connection pooling.
    APPLYTRAIL_DATABASE_URL="..." go run ./cmd/applytrail bootstrap
    ```
 
-4. **Deploy**:
+4. **Put the connection string in Secret Manager**, never in an env var flag:
+
+   ```bash
+   PROJECT=your-project
+   printf '%s' "$POOLED_URL" | gcloud secrets create applytrail-db-url \
+     --data-file=- --project $PROJECT
+   ```
+
+   Piping from stdin keeps the URL out of your shell history and out of the
+   process table.
+
+5. **Give the service its own identity**, holding one binding and nothing else:
+
+   ```bash
+   gcloud iam service-accounts create applytrail-run \
+     --display-name="ApplyTrail Cloud Run runtime" --project $PROJECT
+
+   gcloud secrets add-iam-policy-binding applytrail-db-url \
+     --member="serviceAccount:applytrail-run@$PROJECT.iam.gserviceaccount.com" \
+     --role=roles/secretmanager.secretAccessor --project $PROJECT
+   ```
+
+   Scope the binding to the secret, not to the project. Running as the default
+   compute service account would hand the container every permission that
+   account holds.
+
+6. **Build and push.** Do not use `gcloud run deploy --source .`: that looks for
+   a `Dockerfile` at the repository root, and ApplyTrail's lives at
+   `deploy/Dockerfile`. It would silently fall through to buildpacks and then
+   fail on two `main` packages.
+
+   ```bash
+   REGION=us-east5
+   gcloud artifacts repositories create applytrail \
+     --repository-format=docker --location=$REGION --project $PROJECT
+   gcloud auth configure-docker $REGION-docker.pkg.dev
+
+   VERSION=$(git describe --tags --always --dirty)
+   IMAGE=$REGION-docker.pkg.dev/$PROJECT/applytrail/applytrail:$VERSION
+
+   docker build --platform linux/amd64 -f deploy/Dockerfile \
+     --build-arg VERSION=$VERSION -t $IMAGE .
+   docker push $IMAGE
+   ```
+
+   `--platform linux/amd64` is required when building on Apple Silicon: Cloud
+   Run does not run arm64 images, and the failure surfaces only at deploy time.
+
+7. **Deploy**:
 
    ```bash
    gcloud run deploy applytrail \
-     --source . \
-     --region us-central1 \
+     --image $IMAGE \
+     --region $REGION \
+     --service-account applytrail-run@$PROJECT.iam.gserviceaccount.com \
      --allow-unauthenticated \
-     --set-env-vars APPLYTRAIL_ENV=production \
+     --set-env-vars APPLYTRAIL_ENV=production,APPLYTRAIL_DB_MAX_CONNS=4 \
      --set-secrets APPLYTRAIL_DATABASE_URL=applytrail-db-url:latest \
-     --min-instances 0
+     --min-instances 0 --max-instances 2 \
+     --cpu 1 --memory 512Mi --concurrency 40 --timeout 60s
    ```
 
    `--allow-unauthenticated` lets requests reach the container; ApplyTrail's own
-   API key check is the actual authentication. Put the database URL in Secret
-   Manager, not in an env var flag.
+   API key check is the actual authentication.
+
+   `--max-instances` is a database setting as much as a cost setting: instances
+   multiplied by `APPLYTRAIL_DB_MAX_CONNS` is your connection ceiling on a free
+   Postgres tier, and it is also what bounds the bill if the public endpoint
+   ever takes sustained traffic.
 
    Cloud Run injects `PORT`, which the server reads before falling back to
    `APPLYTRAIL_ADDR`.
 
-5. **Point your agent at it**:
+8. **Point your agent at it**:
 
    ```bash
    claude mcp add --transport http applytrail https://<service-url>/mcp \
      --header "Authorization: Bearer at_live_..."
    ```
+
+   For the claude.ai connector UI, which will not let you set `Authorization`,
+   see [MCP.md](MCP.md).
 
 ### Cold starts
 
@@ -91,7 +158,7 @@ Every setting has a default that works locally; see `.env.example`.
 | `APPLYTRAIL_DB_MAX_CONNS` | `8` | keep low on a serverless Postgres free tier |
 | `APPLYTRAIL_FUZZY_MATCH_THRESHOLD` | `0.87` | at or above this, a fuzzy match is a duplicate |
 | `APPLYTRAIL_FUZZY_REVIEW_THRESHOLD` | `0.75` | between the two, it is `needs_review` |
-| `APPLYTRAIL_RATE_LIMIT_RPM` | `120` | per credential |
+| `APPLYTRAIL_RATE_LIMIT_RPM` | `120` | per credential, per instance |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | **unset means no telemetry is exported at all** |
 
 Invalid configuration fails at boot with every problem listed, rather than on
@@ -106,6 +173,12 @@ the first request that touches it.
 
 Neither needs a credential.
 
+**On Cloud Run, configure probes against `/readyz`, not `/healthz`.** Google's
+frontend intercepts the exact path `/healthz` and answers it itself, so the
+request never reaches the container: `/healthz` returns Google's HTML 404 while
+`/healthz/` and every other route pass through normally. `/readyz` is the more
+useful probe anyway, since it is the one that proves the database is reachable.
+
 ## Issuing keys against a deployed instance
 
 The CLI talks to the **database**, not to the service, so where the service runs
@@ -117,7 +190,7 @@ distroless, which is deliberate.
 Point the CLI at the same database the deployment uses:
 
 ```bash
-export APPLYTRAIL_DATABASE_URL="postgres://...neon.tech/applytrail?sslmode=require"
+export APPLYTRAIL_DATABASE_URL="postgres://...neon.tech/neondb?sslmode=verify-full"
 
 applytrail apikey create --label search-agent --scopes read,write
 applytrail apikey list
@@ -174,6 +247,44 @@ This is a good way to run **migrations** on deploy.
 It is a bad way to create a **key**: the CLI prints the secret to stdout, and a
 job's stdout goes to Cloud Logging, where it is retained and readable by anyone
 with log access. Use one of the two methods above for keys.
+
+## Hardening
+
+The defaults above are the free-tier happy path. Four things are worth doing
+before this holds anything you would mind losing.
+
+**Do not run as the database owner.** The connection string a managed Postgres
+hands you is usually the owner role, which can `DROP` every table. ApplyTrail
+only ever needs DML at runtime; migrations are the one thing that needs more,
+and they run from your laptop or a job, not from the serving container.
+
+```sql
+CREATE ROLE applytrail_app LOGIN PASSWORD '...';
+GRANT USAGE ON SCHEMA public TO applytrail_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO applytrail_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO applytrail_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO applytrail_app;
+```
+
+Point `APPLYTRAIL_DATABASE_URL` at `applytrail_app` and keep the owner
+credential for `migrate up`.
+
+**Give every credential an expiry.** `apikey create --expires` costs nothing and
+turns a leaked key into a problem with an end date. Revocation is checked on
+every request, so rotation needs no redeploy.
+
+**Restrict who can reach the database.** Managed Postgres is usually open to the
+internet with only the password in the way. If your provider offers an IP
+allowlist and your platform offers static egress, use both. On Cloud Run static
+egress costs money, which is the honest reason this is a recommendation rather
+than a step above.
+
+**Know what the rate limits do and do not cover.** `APPLYTRAIL_RATE_LIMIT_RPM`
+is per credential and per instance: several replicas multiply the effective
+budget, and a cold start resets it. Authentication failures are governed by a
+separate, smaller, service-wide budget so credential guessing is not free — a
+caller holding a valid key never touches it.
 
 ## Operations
 

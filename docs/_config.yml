@@ -1,0 +1,18 @@
+# GitHub Pages builds this directory. The site is the same Markdown the
+# repository serves, so there is exactly one copy of the documentation.
+title: ApplyTrail
+description: A job application registry with a real dedupe engine, built for agent-driven job searches.
+theme: jekyll-theme-cayman
+
+# jekyll-relative-links rewrites the .md links these pages use for GitHub's own
+# renderer into .html, so the same source works in both places.
+plugins:
+  - jekyll-relative-links
+relative_links:
+  enabled: true
+  collections: false
+
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - vendor

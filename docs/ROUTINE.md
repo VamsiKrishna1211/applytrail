@@ -2,12 +2,21 @@
 
 ## Connect
 
+For a local Claude Code session:
+
 ```bash
 claude mcp add --transport http applytrail https://<your-host>/mcp \
   --header "Authorization: Bearer at_live_..."
 ```
 
-Mint the key with `applytrail apikey create --label search-agent --scopes read,write`.
+A **cloud** routine cannot see that: it runs in an isolated cloud session with
+no access to your machine, so it reads the connector list on your Claude
+account rather than your local config. Add ApplyTrail once at
+[claude.ai/customize/connectors](https://claude.ai/customize/connectors) as a
+custom connector, using `X-Api-Key` — the connector UI reserves `Authorization`
+for its own OAuth token. [MCP.md](MCP.md) has the exact fields.
+
+Mint the key with `applytrail apikey create --label search-agent --scopes read,write --expires YYYY-MM-DD`.
 
 `read` alone is enough to *check* for duplicates — batch dedupe changes nothing.
 Give the routine `write` only because it also records what it finds.
@@ -61,12 +70,19 @@ response rates between resume versions. It is the whole reason the field exists.
 
 ## Scheduling it
 
-Any scheduler works — ApplyTrail is pull-only and holds no timers of its own.
-With Claude Code:
+Any scheduler works — ApplyTrail is pull-only and holds no timers of its own:
+cron, a CI schedule, a cloud routine.
 
-```bash
-claude schedule create --cron "0 9 * * 1-5" --prompt-file job-search.md
-```
+With Claude Code, routines are created from inside a session rather than from
+the CLI — run `/schedule` and give it the cron expression and the prompt above.
+They can also be managed at
+[claude.ai/code/routines](https://claude.ai/code/routines). Cron expressions are
+interpreted in UTC, so convert your local time first: 9am US Central is
+`0 14 * * 1-5`.
+
+Whatever the scheduler, the routine needs the connector from
+[Connect](#connect) above — a cloud session has no other way to reach your
+deployment.
 
 ## Notes on behaviour
 

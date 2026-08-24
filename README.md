@@ -119,6 +119,11 @@ claude mcp add --transport http applytrail https://<your-host>/mcp \
   --header "Authorization: Bearer at_live_..."
 ```
 
+The key may also travel in an `X-Api-Key` header, carrying the bare token with
+no scheme. That exists for clients which reserve `Authorization` for their own
+OAuth token and will not let you set it — claude.ai's custom connector is one.
+See [`docs/MCP.md`](docs/MCP.md).
+
 Nine tools, shaped around the steps of a search run rather than mirroring the
 REST endpoints:
 
@@ -166,6 +171,7 @@ magic, no ORM.
 |---|---|
 | [`docs/DEDUPE.md`](docs/DEDUPE.md) | how matching works, and why each rule is the way it is |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | layers, ports, and the decisions behind them |
+| [`docs/MCP.md`](docs/MCP.md) | the tool surface, and connecting an agent to it |
 | [`docs/ROUTINE.md`](docs/ROUTINE.md) | driving it from a Claude Code cloud routine |
 | [`docs/DEPLOY.md`](docs/DEPLOY.md) | running it for $0 |
 | [`api/openapi.yaml`](api/openapi.yaml) | the REST surface |
@@ -193,6 +199,12 @@ Adding support for a job board is one entry in the extractor table in
 the design working as intended.
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+## Security
+
+Report vulnerabilities privately — see [`SECURITY.md`](SECURITY.md), which also
+describes the trust model and the two deployment settings most worth getting
+right.
 
 ## License
 
