@@ -75,6 +75,81 @@ func (f *fakeKeyStore) Revoke(context.Context, domain.ID, domain.ID) (domain.API
 	panic("not used")
 }
 
+func TestAuthenticateAlternateHeader(t *testing.T) {
+	generated, err := apikey.Generate()
+	require.NoError(t, err)
+
+	record := domain.APIKey{
+		ID: domain.NewID(), TenantID: domain.NewID(),
+		Prefix: generated.Prefix, Hash: generated.Hash,
+		Label: "connector", Scopes: []domain.Scope{domain.ScopeRead},
+	}
+
+	other, err := apikey.Generate()
+	require.NoError(t, err)
+
+	tests := []struct {
+		name    string
+		set     func(r *http.Request)
+		wantErr bool
+		why     string
+	}{
+		{
+			name: "x-api-key carries a bare token",
+			set:  func(r *http.Request) { r.Header.Set("X-Api-Key", generated.Secret) },
+			why:  "claude.ai connectors reserve Authorization for OAuth and cannot set it",
+		},
+		{
+			name: "header name is case-insensitive",
+			set:  func(r *http.Request) { r.Header.Set("x-api-key", generated.Secret) },
+			why:  "HTTP header names are case-insensitive and clients vary",
+		},
+		{
+			name: "surrounding whitespace is tolerated",
+			set:  func(r *http.Request) { r.Header.Set("X-Api-Key", "  "+generated.Secret+"  ") },
+			why:  "a value pasted into a form often carries stray spaces",
+		},
+		{
+			name: "authorization wins when both are present",
+			set: func(r *http.Request) {
+				r.Header.Set("Authorization", "Bearer "+generated.Secret)
+				r.Header.Set("X-Api-Key", other.Secret)
+			},
+			why: "a stale fallback value must not shadow an explicit Authorization",
+		},
+		{
+			name:    "a bearer scheme in x-api-key is not unwrapped",
+			set:     func(r *http.Request) { r.Header.Set("X-Api-Key", "Bearer "+generated.Secret) },
+			wantErr: true,
+			why:     "the fallback carries a bare token; accepting a scheme would hide a misconfiguration",
+		},
+		{
+			name:    "empty x-api-key is no credential",
+			set:     func(r *http.Request) { r.Header.Set("X-Api-Key", "   ") },
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			keys := &fakeKeyStore{byPrefix: map[string]domain.APIKey{generated.Prefix: record}}
+			authenticator := apikey.New(keys)
+
+			r := httptest.NewRequest(http.MethodGet, "/mcp", nil)
+			tc.set(r)
+
+			principal, err := authenticator.Authenticate(t.Context(), r)
+			if tc.wantErr {
+				require.ErrorIs(t, err, domain.ErrUnauthenticated, tc.why)
+				return
+			}
+			require.NoError(t, err, tc.why)
+			assert.Equal(t, record.TenantID, principal.TenantID, tc.why)
+			assert.Equal(t, record.ID, principal.KeyID)
+		})
+	}
+}
+
 func TestAuthenticate(t *testing.T) {
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	past := now.AddDate(0, 0, -1)

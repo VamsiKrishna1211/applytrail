@@ -46,9 +46,9 @@ func (a *Authenticator) WithClock(now func() time.Time) *Authenticator {
 	return a
 }
 
-// Authenticate resolves the request's bearer token.
+// Authenticate resolves the request's credential.
 func (a *Authenticator) Authenticate(ctx context.Context, r *http.Request) (domain.Principal, error) {
-	secret, ok := bearerToken(r)
+	secret, ok := credentialToken(r)
 	if !ok {
 		return domain.Principal{}, errInvalidCredential
 	}
@@ -98,6 +98,31 @@ func (a *Authenticator) recordUsage(ctx context.Context, id domain.ID, at time.T
 	if err := a.keys.Touch(detached, id, at); err != nil {
 		slog.WarnContext(ctx, "record api key usage", "error", err, "key_id", id)
 	}
+}
+
+// apiKeyHeader carries the credential when Authorization is unavailable.
+//
+// Some MCP clients reserve Authorization for their own OAuth token and will not
+// let a user set it; claude.ai's custom connector is one. They offer a short
+// list of alternative header names instead, of which this is the most common.
+const apiKeyHeader = "X-Api-Key"
+
+// credentialToken extracts the credential from the request.
+//
+// Authorization is the primary channel and is tried first. X-Api-Key is a
+// fallback carrying the bare token with no scheme, for clients that cannot set
+// Authorization. Presenting both is not an error: Authorization wins, so a
+// client that sets one of them cannot be confused by a stale value in the
+// other.
+func credentialToken(r *http.Request) (string, bool) {
+	if token, ok := bearerToken(r); ok {
+		return token, true
+	}
+	token := strings.TrimSpace(r.Header.Get(apiKeyHeader))
+	if token == "" {
+		return "", false
+	}
+	return token, true
 }
 
 // bearerToken extracts the credential from the Authorization header.
