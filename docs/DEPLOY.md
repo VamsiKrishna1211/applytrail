@@ -106,6 +106,75 @@ the first request that touches it.
 
 Neither needs a credential.
 
+## Issuing keys against a deployed instance
+
+The CLI talks to the **database**, not to the service, so where the service runs
+does not matter. There is also no shell in the container: the image is
+distroless, which is deliberate.
+
+### From your machine (simplest)
+
+Point the CLI at the same database the deployment uses:
+
+```bash
+export APPLYTRAIL_DATABASE_URL="postgres://...neon.tech/applytrail?sslmode=require"
+
+applytrail apikey create --label search-agent --scopes read,write
+applytrail apikey list
+applytrail apikey revoke <id>
+```
+
+Nothing needs to be redeployed. Authentication reads the key table on every
+request, so a new key works immediately and a revoked one stops immediately.
+
+Keep the connection string in your password manager, not your shell history:
+
+```bash
+APPLYTRAIL_DATABASE_URL="$(op read op://private/applytrail/neon-url)" \
+  applytrail apikey create --label search-agent --scopes read,write
+```
+
+### Over the API (no database access needed)
+
+Once bootstrapped, an admin key can mint further keys, which is the right path
+for rotation or anything automated:
+
+```bash
+curl -s https://<service-url>/v1/admin/api-keys \
+  -H "Authorization: Bearer $ADMIN_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"label":"search-agent","scopes":["read","write"]}'
+```
+
+The response carries `secret` once. `GET` the same path to list keys — the
+listing never returns anything usable — and `DELETE /v1/admin/api-keys/{id}` to
+revoke.
+
+This is the only path that does not require the database URL on the machine
+issuing the key, so it is the one to give a CI job.
+
+### As a Cloud Run Job
+
+If you would rather the database credentials never sit on a laptop, the image
+already contains the CLI at `/applytrail`; only the entrypoint differs.
+
+```bash
+gcloud run jobs deploy applytrail-admin \
+  --source . \
+  --region us-central1 \
+  --set-secrets APPLYTRAIL_DATABASE_URL=applytrail-db-url:latest \
+  --command /applytrail \
+  --args migrate,up
+
+gcloud run jobs execute applytrail-admin --region us-central1 --wait
+```
+
+This is a good way to run **migrations** on deploy.
+
+It is a bad way to create a **key**: the CLI prints the secret to stdout, and a
+job's stdout goes to Cloud Logging, where it is retained and readable by anyone
+with log access. Use one of the two methods above for keys.
+
 ## Operations
 
 ```bash
@@ -116,3 +185,9 @@ applytrail apikey revoke <id>          # takes effect immediately
 
 Revocation is checked on every request, so it needs no restart and no cache
 invalidation.
+
+Keys can also carry an expiry, which is worth doing for anything automated:
+
+```bash
+applytrail apikey create --label ci --scopes read --expires 2027-01-01
+```
