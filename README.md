@@ -2,6 +2,11 @@
 
 **A job application registry with a real dedupe engine, built for agent-driven job searches.**
 
+📖 **[Documentation](https://vamsikrishna1211.github.io/applytrail/)** ·
+[Getting started](https://vamsikrishna1211.github.io/applytrail/GETTING-STARTED.html) ·
+[REST API](https://vamsikrishna1211.github.io/applytrail/API.html) ·
+[MCP tools](https://vamsikrishna1211.github.io/applytrail/MCP.html)
+
 If you have an agent — a Claude Code cloud routine, a cron script, anything —
 searching job boards on a schedule, it has no memory between runs. It
 re-surfaces the same postings every morning, and eventually re-applies to a job
@@ -167,21 +172,26 @@ magic, no ORM.
 
 ## Documentation
 
-**[vamsikrishna1211.github.io/applytrail](https://vamsikrishna1211.github.io/applytrail/)**
-— the same Markdown as below, with navigation.
+### 📖 [vamsikrishna1211.github.io/applytrail](https://vamsikrishna1211.github.io/applytrail/)
+
+The full site, with navigation and cross-links. Every page below is also plain
+Markdown in [`docs/`](docs/), so it reads on GitHub too — there is exactly one
+copy of each.
 
 | | |
 |---|---|
-| [Getting started](docs/GETTING-STARTED.md) | from a fresh clone to a deduped posting in five minutes |
-| [Configuration](docs/CONFIGURATION.md) | every environment variable, its default, and its bounds |
-| [Deduplication](docs/DEDUPE.md) | how matching works, and why each rule is the way it is |
-| [Data model](docs/DATA-MODEL.md) | entities, the status graph, and the event timeline |
-| [Architecture](docs/ARCHITECTURE.md) | layers, ports, and the decisions behind them |
-| [REST API](docs/API.md) | every endpoint, its scope, and the error envelope |
-| [MCP tools](docs/MCP.md) | the tool surface, and connecting an agent to it |
-| [CLI](docs/CLI.md) | migrations, tenants, credentials, and profiles |
-| [Deployment](docs/DEPLOY.md) | running it for $0, and hardening it |
-| [Cloud routines](docs/ROUTINE.md) | driving it from a scheduled Claude Code session |
+| [Getting started](https://vamsikrishna1211.github.io/applytrail/GETTING-STARTED.html) | from a fresh clone to a deduped posting in five minutes |
+| [Configuration](https://vamsikrishna1211.github.io/applytrail/CONFIGURATION.html) | every environment variable, its default, and its bounds |
+| [Deduplication](https://vamsikrishna1211.github.io/applytrail/DEDUPE.html) | how matching works, and why each rule is the way it is |
+| [Data model](https://vamsikrishna1211.github.io/applytrail/DATA-MODEL.html) | entities, the status graph, and the event timeline |
+| [Architecture](https://vamsikrishna1211.github.io/applytrail/ARCHITECTURE.html) | layers, ports, and the decisions behind them |
+| [REST API](https://vamsikrishna1211.github.io/applytrail/API.html) | every endpoint, its scope, and the error envelope |
+| [MCP tools](https://vamsikrishna1211.github.io/applytrail/MCP.html) | the tool surface, and connecting an agent to it |
+| [CLI](https://vamsikrishna1211.github.io/applytrail/CLI.html) | migrations, tenants, credentials, and profiles |
+| [Deployment](https://vamsikrishna1211.github.io/applytrail/DEPLOY.html) | running it for $0, and hardening it |
+| [Cloud routines](https://vamsikrishna1211.github.io/applytrail/ROUTINE.html) | driving it from a scheduled Claude Code session |
+| [Security](https://vamsikrishna1211.github.io/applytrail/SECURITY.html) | the trust model, and reporting a vulnerability |
+| [Contributing](https://vamsikrishna1211.github.io/applytrail/CONTRIBUTING.html) | adding a job board, changing the schema, running the tests |
 | [`api/openapi.yaml`](api/openapi.yaml) | the machine-readable REST contract |
 
 ## Deployment
