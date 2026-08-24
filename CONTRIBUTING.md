@@ -3,11 +3,14 @@
 ## Setup
 
 ```bash
-make tools     # sqlc, goose, golangci-lint
 make up        # postgres 17 in docker
 make migrate
 make test
 ```
+
+`make tools` installs sqlc, goose, and golangci-lint. You only need them to
+regenerate queries, author a new migration, or lint — applying migrations goes
+through the CLI, which embeds them.
 
 `make check` runs what CI runs.
 

@@ -74,14 +74,14 @@ ApplyTrail catches it:
 Requires Go 1.25+ and Docker.
 
 ```bash
-make tools                  # sqlc, goose, golangci-lint
-make up                     # postgres 17
-export APPLYTRAIL_DATABASE_URL='postgres://applytrail:applytrail@localhost:5432/applytrail?sslmode=disable'
-
-go run ./cmd/applytrail migrate up
-go run ./cmd/applytrail bootstrap        # prints an admin key, once
+make up          # postgres 17
+make migrate
+make bootstrap   # prints an admin key, once
 make run
 ```
+
+No configuration needed: every command defaults to the database `make up`
+starts. Set `APPLYTRAIL_DATABASE_URL` to point elsewhere.
 
 Create a targeting profile and a key for your agent:
 

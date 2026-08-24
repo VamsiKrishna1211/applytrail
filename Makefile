@@ -15,7 +15,11 @@ include .env
 export
 endif
 
-DB_URL ?= $(APPLYTRAIL_DATABASE_URL)
+# Migrations run through the CLI rather than the goose binary: the CLI embeds
+# the migration files and already knows the local docker-compose default, so
+# `make migrate` works on a fresh clone with no .env and no goose installed.
+# The goose binary is still needed to author a new migration file.
+APPLYTRAIL := go run ./cmd/applytrail
 
 .DEFAULT_GOAL := help
 
@@ -47,15 +51,19 @@ psql:
 
 ## migrate: apply all pending migrations
 migrate:
-	goose -dir $(MIGRATIONS) postgres "$(DB_URL)" up
+	$(APPLYTRAIL) migrate up
 
 ## migrate-down: roll back the most recent migration
 migrate-down:
-	goose -dir $(MIGRATIONS) postgres "$(DB_URL)" down
+	$(APPLYTRAIL) migrate down
 
 ## migrate-status: show migration state
 migrate-status:
-	goose -dir $(MIGRATIONS) postgres "$(DB_URL)" status
+	$(APPLYTRAIL) migrate status
+
+## bootstrap: create the first tenant and an admin key
+bootstrap:
+	$(APPLYTRAIL) bootstrap
 
 ## migrate-new: create a migration (usage: make migrate-new NAME=add_foo)
 migrate-new:
@@ -104,5 +112,5 @@ check: fmt lint test-short
 docker-build:
 	docker build -f deploy/Dockerfile -t applytrail:$(VERSION) .
 
-.PHONY: help tools up down nuke psql migrate migrate-down migrate-status migrate-new \
+.PHONY: help tools up down nuke psql migrate migrate-down migrate-status migrate-new bootstrap \
         sqlc build run test test-short cover lint fmt check docker-build
