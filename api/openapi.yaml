@@ -1,0 +1,808 @@
+openapi: 3.1.0
+
+info:
+  title: ApplyTrail
+  version: "1.0.0"
+  description: |
+    A job application registry with a real dedupe engine, built for agent-driven
+    job searches.
+
+    ApplyTrail does not search job boards. Your agent searches; ApplyTrail
+    remembers, and answers whether a posting has been seen before.
+
+    The same capabilities are exposed over the Model Context Protocol at
+    `POST /mcp`, backed by the same service layer, so the two surfaces cannot
+    behave differently.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+servers:
+  - url: http://localhost:8080
+    description: local development
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: dedupe
+    description: The hot path. Ask which candidates are worth pursuing.
+  - name: applications
+    description: The pipeline and its timeline.
+  - name: search
+    description: Targeting criteria and run auditing.
+  - name: admin
+    description: Credential management.
+
+paths:
+  /healthz:
+    get:
+      summary: Liveness probe
+      description: Checks nothing on purpose. A process that can serve this is alive.
+      security: []
+      tags: [admin]
+      responses:
+        "200":
+          description: alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  version: { type: string }
+
+  /readyz:
+    get:
+      summary: Readiness probe
+      description: Pings the database with a short timeout.
+      security: []
+      tags: [admin]
+      responses:
+        "200": { description: ready }
+        "503": { description: a dependency is unreachable }
+
+  /v1/postings:filter:
+    post:
+      operationId: filterPostings
+      summary: Which of these candidates are worth pursuing?
+      tags: [dedupe]
+      description: |
+        The main endpoint. Deduplicates a batch against everything already
+        tracked and returns a verdict per candidate.
+
+        Read-only despite being a POST — the candidate list does not fit in a
+        query string. Safe to retry. Requires only the `read` scope, so a search
+        agent can run with a credential that cannot mutate anything.
+
+        Results correlate to the request by `index`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FilterRequest" }
+      responses:
+        "200":
+          description: a verdict per candidate
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FilterResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/postings:ingest:
+    post:
+      operationId: ingestPostings
+      summary: Record discovered postings
+      tags: [dedupe]
+      description: |
+        Deduplicates, then records what is genuinely new. Idempotent: a retried
+        call after a timeout does not create a second posting.
+
+        Candidates that come back `needs_review` are reported but deliberately
+        **not** recorded. The engine could not tell whether they duplicate
+        something, and writing either answer is worse than handing the decision
+        back.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IngestRequest" }
+      responses:
+        "200":
+          description: what happened to each candidate
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IngestResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/applications:
+    get:
+      operationId: listApplications
+      summary: List the pipeline
+      tags: [applications]
+      parameters:
+        - { name: status, in: query, schema: { type: array, items: { $ref: "#/components/schemas/Status" } }, style: form, explode: true }
+        - { name: company, in: query, schema: { type: string }, description: employer name }
+        - { name: since, in: query, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 500 } }
+        - { name: cursor, in: query, schema: { type: string }, description: opaque keyset token from a previous page }
+      responses:
+        "200":
+          description: a page of applications
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  applications:
+                    type: array
+                    items: { $ref: "#/components/schemas/Application" }
+                  next_cursor:
+                    type: string
+                    description: absent on the last page
+    post:
+      operationId: recordApplication
+      summary: Record that you applied
+      tags: [applications]
+      description: |
+        Accepts either `posting_id` for a tracked posting, or the job inline via
+        `posting`, so an agent that just applied need not ingest it first.
+        Schedules a follow-up, and the job becomes a permanent duplicate.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecordApplicationRequest" }
+      responses:
+        "201":
+          description: recorded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Application" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /v1/applications/followups:
+    get:
+      operationId: getFollowupsDue
+      summary: Applications gone quiet long enough to chase
+      tags: [applications]
+      description: Terminal applications never appear here.
+      parameters:
+        - { name: due_before, in: query, schema: { type: string, format: date-time }, description: treat this time as now }
+        - { name: limit, in: query, schema: { type: integer, default: 50 } }
+      responses:
+        "200":
+          description: overdue applications
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  followups:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/Application"
+                        - type: object
+                          properties:
+                            days_since_applied: { type: integer }
+                            days_overdue: { type: integer }
+
+  /v1/applications/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getApplication
+      summary: One application with its timeline and contacts
+      tags: [applications]
+      parameters:
+        - { name: event_limit, in: query, schema: { type: integer, default: 100 } }
+      responses:
+        "200":
+          description: full detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  application: { $ref: "#/components/schemas/Application" }
+                  events:
+                    type: array
+                    items: { $ref: "#/components/schemas/Event" }
+                  contacts:
+                    type: array
+                    items: { $ref: "#/components/schemas/Contact" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      operationId: updateApplicationStatus
+      summary: Move an application through the pipeline
+      tags: [applications]
+      description: |
+        Only valid transitions are accepted; an invalid one returns 400 naming
+        what is allowed from the current status. Terminal statuses clear the
+        follow-up automatically.
+
+        Concurrent transitions are compare-and-swap: a stale writer gets 409
+        rather than silently overwriting.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { $ref: "#/components/schemas/Status" }
+                occurred_at: { type: string, format: date-time }
+                note: { type: string }
+                next_action_at: { type: string, format: date-time }
+                clear_next_action: { type: boolean }
+      responses:
+        "200":
+          description: updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Application" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { description: another change landed first }
+
+  /v1/applications/{id}/notes:
+    post:
+      operationId: addNote
+      summary: Append a dated note
+      tags: [applications]
+      description: Notes accumulate rather than overwrite.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [note]
+              properties:
+                note: { type: string }
+      responses:
+        "200":
+          description: updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Application" }
+
+  /v1/search-profiles:
+    get:
+      operationId: listSearchProfiles
+      summary: List targeting profiles
+      tags: [search]
+      parameters:
+        - { name: active, in: query, schema: { type: boolean } }
+      responses:
+        "200":
+          description: profiles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profiles:
+                    type: array
+                    items: { $ref: "#/components/schemas/SearchProfile" }
+    post:
+      operationId: createSearchProfile
+      summary: Create a targeting profile
+      tags: [search]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SearchProfile" }
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SearchProfile" }
+
+  /v1/search-profiles/{name}:
+    get:
+      operationId: getSearchProfile
+      summary: Fetch a profile with its effective resurfacing policy
+      tags: [search]
+      description: |
+        `effective_resurface_policy` is the profile's overrides merged onto the
+        defaults, so a caller sees every cooldown that will actually apply
+        rather than only the deviations this profile chose to record.
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: the profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profile: { $ref: "#/components/schemas/SearchProfile" }
+                  effective_resurface_policy:
+                    type: object
+                    additionalProperties: { type: integer }
+                  runs_today: { type: integer }
+                  last_run_at: { type: string, format: date-time }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/search-runs:
+    get:
+      operationId: listSearchRuns
+      summary: Audit of executed searches
+      tags: [search]
+      responses:
+        "200":
+          description: runs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  runs:
+                    type: array
+                    items: { $ref: "#/components/schemas/SearchRun" }
+    post:
+      operationId: startSearchRun
+      summary: Open a search run to log against
+      tags: [search]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                profile: { type: string }
+                source: { type: string }
+                query: { type: string }
+                notes: { type: string }
+      responses:
+        "201":
+          description: opened
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SearchRun" }
+
+  /v1/contacts:
+    get:
+      operationId: listContacts
+      summary: List recruiters and hiring managers
+      tags: [applications]
+      parameters:
+        - { name: company_id, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, default: 50 } }
+      responses:
+        "200":
+          description: contacts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contacts:
+                    type: array
+                    items: { $ref: "#/components/schemas/Contact" }
+    post:
+      operationId: upsertContact
+      summary: Record a contact
+      tags: [applications]
+      description: Matched on email when one is given, so repeated calls update one record.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                role: { type: string }
+                email: { type: string, format: email }
+                linkedin_url: { type: string }
+                notes: { type: string }
+                company: { type: string }
+                application_id: { type: string, format: uuid }
+                last_contact_at: { type: string, format: date-time }
+      responses:
+        "200":
+          description: recorded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Contact" }
+
+  /v1/stats:
+    get:
+      operationId: getStats
+      summary: Funnel counts and per-resume response rates
+      tags: [applications]
+      description: |
+        Every status is reported, including empty ones, so a caller rendering a
+        funnel need not know the status list.
+      responses:
+        "200":
+          description: statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  by_status:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        status: { $ref: "#/components/schemas/Status" }
+                        count: { type: integer }
+                  resume_variants:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        variant: { type: string }
+                        sent: { type: integer }
+                        responded: { type: integer }
+                        rejected: { type: integer }
+                        ghosted: { type: integer }
+                        response_rate: { type: number, format: float }
+                  total_tracked: { type: integer }
+                  total_applied: { type: integer }
+                  response_rate: { type: number, format: float }
+
+  /v1/admin/api-keys:
+    get:
+      operationId: listAPIKeys
+      summary: List credentials
+      tags: [admin]
+      responses:
+        "200":
+          description: keys, without anything usable
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keys:
+                    type: array
+                    items: { $ref: "#/components/schemas/APIKey" }
+    post:
+      operationId: createAPIKey
+      summary: Issue a credential
+      tags: [admin]
+      description: The secret is returned exactly once and cannot be recovered.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scopes]
+              properties:
+                label: { type: string }
+                scopes:
+                  type: array
+                  items: { type: string, enum: [read, write, admin] }
+                expires_at: { type: string, format: date-time }
+      responses:
+        "201":
+          description: issued
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/APIKey"
+                  - type: object
+                    properties:
+                      secret:
+                        type: string
+                        description: shown once, here, and never again
+
+  /v1/admin/api-keys/{id}:
+    delete:
+      operationId: revokeAPIKey
+      summary: Revoke a credential
+      tags: [admin]
+      description: Takes effect on the next request. Idempotent.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: revoked
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/APIKey" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        An ApplyTrail API key, `at_live_...`. Scopes are `read`, `write`, and
+        `admin`; `admin` implies the others.
+
+  responses:
+    BadRequest:
+      description: the request is malformed or invalid
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: missing or invalid credential
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: the credential lacks the required scope
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: no such record
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    RateLimited:
+      description: over the per-credential budget
+      headers:
+        Retry-After:
+          schema: { type: integer }
+          description: seconds to wait
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              enum: [invalid_argument, unauthenticated, permission_denied, not_found, conflict, rate_limited, internal]
+            message: { type: string }
+            details:
+              type: array
+              items: { type: string }
+              description: every validation problem at once, not just the first
+            request_id: { type: string }
+
+    Status:
+      type: string
+      enum: [discovered, screened_out, queued, applied, screening, interview, offer, accepted, rejected, ghosted, withdrawn]
+
+    Verdict:
+      type: string
+      enum: [new, duplicate, eligible_again, needs_review]
+      description: |
+        `needs_review` means a close but inconclusive match. The engine refuses
+        to guess: read `reason` and `posting_id` and decide.
+
+    MatchTier:
+      type: string
+      enum: [none, exact_url, ats_id, fingerprint, content_hash, fuzzy]
+
+    Candidate:
+      type: object
+      description: |
+        A posting as found. Either `url`, or both `title` and `company`, is
+        required. Everything else improves match quality if present —
+        `description` in particular enables catching the same job cross-posted
+        under a different title.
+      properties:
+        url: { type: string }
+        title: { type: string }
+        company: { type: string }
+        location: { type: string }
+        source: { type: string, enum: [greenhouse, lever, ashby, workday, smartrecruiters, workable, linkedin, indeed, company_site, referral, other] }
+        description: { type: string }
+        posted_at: { type: string, format: date-time }
+        remote_type: { type: string, enum: ["", remote, hybrid, onsite] }
+        seniority: { type: string, enum: ["", intern, junior, mid, senior, staff, principal, lead, manager, director, executive] }
+        comp_min: { type: integer, format: int64 }
+        comp_max: { type: integer, format: int64 }
+        comp_currency: { type: string }
+        visa_sponsorship: { type: boolean }
+        tech_tags:
+          type: array
+          items: { type: string }
+
+    FilterRequest:
+      type: object
+      required: [candidates]
+      properties:
+        candidates:
+          type: array
+          maxItems: 500
+          items: { $ref: "#/components/schemas/Candidate" }
+        profile:
+          type: string
+          description: profile whose resurfacing rules apply
+        resurface_policy:
+          type: object
+          additionalProperties: { type: integer }
+          description: |
+            Per-status cooldown in days for this call only; `-1` means never.
+            Not persisted.
+        search_run_id: { type: string, format: uuid }
+
+    Result:
+      type: object
+      properties:
+        index: { type: integer, description: position of this candidate in the request }
+        verdict: { $ref: "#/components/schemas/Verdict" }
+        match_tier: { $ref: "#/components/schemas/MatchTier" }
+        confidence:
+          type: number
+          format: float
+          description: 1.0 for identifier matches; the measured similarity for fuzzy ones
+        reason: { type: string }
+        posting_id: { type: string, format: uuid }
+        application_id: { type: string, format: uuid }
+        application_status: { $ref: "#/components/schemas/Status" }
+        first_seen_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        days_since: { type: integer }
+
+    Summary:
+      type: object
+      properties:
+        total: { type: integer }
+        new: { type: integer }
+        duplicate: { type: integer }
+        eligible_again: { type: integer }
+        needs_review: { type: integer }
+
+    FilterResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/Result" }
+        summary: { $ref: "#/components/schemas/Summary" }
+        profile_applied: { type: string }
+
+    IngestRequest:
+      type: object
+      required: [candidates]
+      properties:
+        candidates:
+          type: array
+          maxItems: 500
+          items: { $ref: "#/components/schemas/Candidate" }
+        profile: { type: string }
+        resurface_policy:
+          type: object
+          additionalProperties: { type: integer }
+        search_run_id: { type: string, format: uuid }
+
+    IngestResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/Result"
+              - type: object
+                properties:
+                  created:
+                    type: boolean
+                    description: true when recorded for the first time
+        summary: { $ref: "#/components/schemas/Summary" }
+        profile_applied: { type: string }
+
+    RecordApplicationRequest:
+      type: object
+      description: Supply either `posting_id` or `posting`.
+      properties:
+        posting_id: { type: string, format: uuid }
+        posting: { $ref: "#/components/schemas/Candidate" }
+        applied_at: { type: string, format: date-time }
+        resume_variant:
+          type: string
+          description: label of the resume sent, so response rates can be compared later
+        resume_url: { type: string }
+        resume_hash: { type: string }
+        cover_letter_variant: { type: string }
+        notes: { type: string }
+        follow_up_in_days: { type: integer, default: 14 }
+
+    Application:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        posting_id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/Status" }
+        company: { type: string }
+        title: { type: string }
+        url: { type: string }
+        location: { type: string }
+        applied_at: { type: string, format: date-time }
+        resume_variant: { type: string }
+        resume_url: { type: string }
+        cover_letter_variant: { type: string }
+        next_action_at: { type: string, format: date-time }
+        notes: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Event:
+      type: object
+      description: Append-only. Never updated or deleted.
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [created, status_changed, note_added, contact_logged, follow_up_sent, rediscovered] }
+        from_status: { $ref: "#/components/schemas/Status" }
+        to_status: { $ref: "#/components/schemas/Status" }
+        occurred_at: { type: string, format: date-time }
+        actor: { type: string, description: the credential label, or "system" }
+
+    Contact:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        role: { type: string }
+        email: { type: string, format: email }
+        linkedin_url: { type: string }
+        notes: { type: string }
+        last_contact_at: { type: string, format: date-time }
+
+    SearchProfile:
+      type: object
+      required: [name]
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        name: { type: string }
+        description: { type: string }
+        active: { type: boolean, default: true }
+        keywords: { type: array, items: { type: string } }
+        titles: { type: array, items: { type: string } }
+        locations: { type: array, items: { type: string } }
+        remote_only: { type: boolean }
+        min_compensation: { type: integer, format: int64 }
+        currency: { type: string }
+        seniority: { type: array, items: { type: string } }
+        company_allowlist: { type: array, items: { type: string } }
+        company_blocklist: { type: array, items: { type: string } }
+        exclude_keywords: { type: array, items: { type: string } }
+        resurface_policy:
+          type: object
+          additionalProperties: { type: integer }
+          description: per-status cooldown in days; -1 means never
+
+    SearchRun:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        profile: { type: string }
+        source: { type: string }
+        query: { type: string }
+        candidates_seen: { type: integer }
+        new_count: { type: integer }
+        duplicate_count: { type: integer }
+        needs_review_count: { type: integer }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        notes: { type: string }
+
+    APIKey:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        prefix: { type: string, description: the non-secret lookup portion }
+        label: { type: string }
+        scopes: { type: array, items: { type: string } }
+        last_used_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }

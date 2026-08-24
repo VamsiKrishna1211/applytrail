@@ -53,12 +53,32 @@ func (s *Store) Tx(ctx context.Context, fn func(ctx context.Context, tx store.St
 	return nil
 }
 
-func (s *Store) Tenants() store.TenantStore               { return tenantStore{q: s.q} }
-func (s *Store) APIKeys() store.APIKeyStore               { return apiKeyStore{q: s.q} }
-func (s *Store) Companies() store.CompanyStore            { return companyStore{q: s.q} }
-func (s *Store) Postings() store.PostingStore             { return postingStore{q: s.q} }
-func (s *Store) Applications() store.ApplicationStore     { return applicationStore{q: s.q} }
-func (s *Store) Events() store.EventStore                 { return eventStore{q: s.q} }
-func (s *Store) Contacts() store.ContactStore             { return contactStore{q: s.q} }
+// The accessors below return sub-stores bound to this Store's queries, which
+// are the transaction's queries when the Store came from Tx.
+
+// Tenants returns the tenant sub-store.
+func (s *Store) Tenants() store.TenantStore { return tenantStore{q: s.q} }
+
+// APIKeys returns the credential sub-store.
+func (s *Store) APIKeys() store.APIKeyStore { return apiKeyStore{q: s.q} }
+
+// Companies returns the employer sub-store.
+func (s *Store) Companies() store.CompanyStore { return companyStore{q: s.q} }
+
+// Postings returns the posting sub-store, which also serves dedupe lookups.
+func (s *Store) Postings() store.PostingStore { return postingStore{q: s.q} }
+
+// Applications returns the pipeline sub-store.
+func (s *Store) Applications() store.ApplicationStore { return applicationStore{q: s.q} }
+
+// Events returns the append-only timeline sub-store.
+func (s *Store) Events() store.EventStore { return eventStore{q: s.q} }
+
+// Contacts returns the people sub-store.
+func (s *Store) Contacts() store.ContactStore { return contactStore{q: s.q} }
+
+// SearchProfiles returns the targeting-configuration sub-store.
 func (s *Store) SearchProfiles() store.SearchProfileStore { return searchProfileStore{q: s.q} }
-func (s *Store) SearchRuns() store.SearchRunStore         { return searchRunStore{q: s.q} }
+
+// SearchRuns returns the search-audit sub-store.
+func (s *Store) SearchRuns() store.SearchRunStore { return searchRunStore{q: s.q} }

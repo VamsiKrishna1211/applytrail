@@ -106,7 +106,7 @@ func decodeJSON(r *http.Request, dst any) error {
 		if errors.As(err, &maxErr) {
 			return fmt.Errorf("%w: request body exceeds %d bytes", domain.ErrInvalidArgument, maxErr.Limit)
 		}
-		return fmt.Errorf("%w: malformed JSON body: %s", domain.ErrInvalidArgument, err)
+		return fmt.Errorf("%w: malformed JSON body: %w", domain.ErrInvalidArgument, err)
 	}
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return fmt.Errorf("%w: body must contain exactly one JSON object", domain.ErrInvalidArgument)

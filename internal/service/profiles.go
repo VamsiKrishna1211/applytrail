@@ -20,12 +20,11 @@ func (s *Service) CreateProfile(ctx context.Context, p domain.Principal, profile
 	return s.store.SearchProfiles().Create(ctx, profile)
 }
 
-// GetProfile returns a profile by name, with its effective resurfacing rules
-// resolved.
+// ProfileView is a profile resolved for a caller about to run a search.
 //
-// Callers get the merged policy, not the sparse override stored on the row: an
-// agent reading a profile should see every cooldown that will actually apply,
-// not just the ones this profile chose to change.
+// It carries the merged resurfacing policy rather than the sparse override
+// stored on the row: an agent reading a profile should see every cooldown that
+// will actually apply, not just the ones this profile chose to change.
 type ProfileView struct {
 	Profile domain.SearchProfile
 	// EffectiveResurfacePolicy is the profile's overrides merged onto the

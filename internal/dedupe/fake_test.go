@@ -109,7 +109,7 @@ func (f *fakeStore) FindByDescriptionHashes(_ context.Context, tenantID domain.I
 func (f *fakeStore) FindFuzzyCandidates(_ context.Context, tenantID, companyID domain.ID, normalizedTitle string, limit int) ([]domain.PostingRef, error) {
 	var out []domain.PostingRef
 	for _, p := range f.postings {
-		if p.ref.PostingID == domain.ID(uuidNil) || p.companyID != companyID {
+		if p.companyID != companyID {
 			continue
 		}
 		if !sharesAnyToken(normalizedTitle, p.ref.NormalizedTitle) {
@@ -163,5 +163,3 @@ func sharesAnyToken(a, b string) bool {
 	}
 	return false
 }
-
-var uuidNil domain.ID

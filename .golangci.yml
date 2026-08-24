@@ -14,6 +14,13 @@ linters:
     - unconvert
     - wastedassign
   settings:
+    errcheck:
+      # Writing to stdout or a tabwriter has no meaningful failure handling in a
+      # CLI: if stdout is broken the process has nothing left to report with.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
     revive:
       rules:
         - name: exported
@@ -24,6 +31,9 @@ linters:
         linters:
           - gosec
           - noctx
+          # Test helpers close response bodies via t.Cleanup, which bodyclose
+          # cannot see through.
+          - bodyclose
 
 formatters:
   enable:

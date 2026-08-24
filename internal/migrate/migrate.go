@@ -59,7 +59,7 @@ func withDB(ctx context.Context, databaseURL string, fn func(*sql.DB) error) err
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	if err := db.PingContext(ctx); err != nil {
 		return fmt.Errorf("ping database: %w", err)

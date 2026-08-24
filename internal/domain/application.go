@@ -12,6 +12,7 @@ import (
 // judged and rejected by the tenant.
 type Status string
 
+// The pipeline statuses, in rough order.
 const (
 	StatusDiscovered  Status = "discovered"
 	StatusScreenedOut Status = "screened_out"
@@ -151,6 +152,7 @@ type Application struct {
 // EventType classifies an entry in the application timeline.
 type EventType string
 
+// The kinds of entry a timeline can hold.
 const (
 	EventCreated       EventType = "created"
 	EventStatusChanged EventType = "status_changed"

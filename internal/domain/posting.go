@@ -28,6 +28,7 @@ const (
 // RemoteType describes the work arrangement.
 type RemoteType string
 
+// The recognised work arrangements.
 const (
 	RemoteUnknown RemoteType = ""
 	RemoteFull    RemoteType = "remote"
@@ -48,6 +49,7 @@ func (r RemoteType) Valid() bool {
 // the target band.
 type Seniority string
 
+// The recognised seniority buckets.
 const (
 	SeniorityUnknown   Seniority = ""
 	SeniorityIntern    Seniority = "intern"

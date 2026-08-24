@@ -268,7 +268,8 @@ func (s *Service) ListApplications(ctx context.Context, p domain.Principal, filt
 	return s.store.Applications().List(ctx, p.TenantID, filter)
 }
 
-// GetApplication returns one application with its timeline and contacts.
+// ApplicationDetail is one application with its timeline and its contacts,
+// gathered in one call so a caller does not have to make three.
 type ApplicationDetail struct {
 	Application store.ApplicationWithPosting
 	Events      []domain.ApplicationEvent

@@ -14,9 +14,20 @@ import (
 	"time"
 )
 
+// defaultDatabaseURL matches deploy/docker-compose.yml, so `go run` works
+// against a freshly started local stack with no configuration at all. The
+// credentials in it are that compose file's throwaway local ones.
+const defaultDatabaseURL = "postgres://applytrail:applytrail@localhost:5432/applytrail?sslmode=disable" //nolint:gosec // local development default, not a secret
+
+// maxPoolSize bounds the connection pool. Postgres itself caps connections far
+// below this, and the ceiling also keeps the value inside int32 so a nonsense
+// env var cannot wrap it negative.
+const maxPoolSize = 1000
+
 // Environment distinguishes local development from a deployed instance.
 type Environment string
 
+// The environments a deployment can declare.
 const (
 	EnvDevelopment Environment = "development"
 	EnvProduction  Environment = "production"
@@ -83,9 +94,9 @@ func Load() (Config, error) {
 		LogLevel: getString("APPLYTRAIL_LOG_LEVEL", "info"),
 
 		Database: DatabaseConfig{
-			URL:      getString("APPLYTRAIL_DATABASE_URL", "postgres://applytrail:applytrail@localhost:5432/applytrail?sslmode=disable"),
-			MaxConns: int32(getInt("APPLYTRAIL_DB_MAX_CONNS", 8)),
-			MinConns: int32(getInt("APPLYTRAIL_DB_MIN_CONNS", 0)),
+			URL:      getString("APPLYTRAIL_DATABASE_URL", defaultDatabaseURL),
+			MaxConns: getPoolSize("APPLYTRAIL_DB_MAX_CONNS", 8),
+			MinConns: getPoolSize("APPLYTRAIL_DB_MIN_CONNS", 0),
 		},
 		Dedupe: DedupeConfig{
 			MatchThreshold:  getFloat("APPLYTRAIL_FUZZY_MATCH_THRESHOLD", 0.87),
@@ -183,6 +194,21 @@ func getInt(key string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+// getPoolSize reads a connection count, clamped into a sane range. Validation
+// reports anything out of bounds, but clamping first means the conversion to
+// int32 can never overflow.
+func getPoolSize(key string, fallback int) int32 {
+	n := getInt(key, fallback)
+	switch {
+	case n < 0:
+		return -1 // rejected by validate, with the key named
+	case n > maxPoolSize:
+		return maxPoolSize
+	default:
+		return int32(n)
+	}
 }
 
 func getFloat(key string, fallback float64) float64 {
