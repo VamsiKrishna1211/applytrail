@@ -1,8 +1,10 @@
 # binaries
 /bin/
 /dist/
-applytrail
-applytrail-server
+# anchored: unanchored, these match the cmd/applytrail and
+# cmd/applytrail-server directories and silently hide new source files
+/applytrail
+/applytrail-server
 
 # env / secrets
 .env
