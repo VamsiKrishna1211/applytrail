@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/VamsiKrishna1211/applytrail/internal/auth"
 	"github.com/VamsiKrishna1211/applytrail/internal/domain"
@@ -17,13 +18,21 @@ import (
 // It also adds the key's identity to the log fields, so every later line in
 // the request carries which credential made it: that is the audit trail when
 // several agents share one deployment.
-func authenticate(authenticator auth.Authenticator) func(http.Handler) http.Handler {
+func authenticate(authenticator auth.Authenticator, failures ratelimit.Limiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			principal, err := authenticator.Authenticate(r.Context(), r)
 			if err != nil {
-				// Advertise the scheme so a client knows what to send.
-				w.Header().Set("WWW-Authenticate", `Bearer realm="applytrail"`)
+				if retryAfter, ok := authFailureExhausted(r, failures); ok {
+					w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())))
+					writeError(w, r, fmt.Errorf("%w: too many failed authentication attempts", domain.ErrRateLimited))
+					return
+				}
+				// Advertise both accepted schemes so a client knows what to
+				// send. The api_key challenge is what stops a spec-aware MCP
+				// client reading the bare Bearer challenge as an invitation to
+				// start an OAuth flow this server does not implement.
+				w.Header().Set("WWW-Authenticate", `Bearer realm="applytrail", api_key realm="applytrail"`)
 				writeError(w, r, err)
 				return
 			}
@@ -36,6 +45,37 @@ func authenticate(authenticator auth.Authenticator) func(http.Handler) http.Hand
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// authFailureBudgetKey is a single shared bucket rather than one per client.
+//
+// Keying on the client address would look tighter but is not: the address
+// arrives in X-Forwarded-For, which the caller controls, so an attacker rotates
+// it for free while a legitimate agent behind a shared egress gets throttled
+// for someone else's mistakes. One global budget cannot be evaded that way, and
+// it only ever governs requests that already failed to authenticate — a caller
+// holding a valid key never touches it.
+const authFailureBudgetKey = "auth-failure"
+
+// authFailureExhausted consumes one unit of the failure budget and reports
+// whether the caller has run out, along with how long to wait.
+//
+// A limiter error is deliberately treated as "not exhausted": a broken limiter
+// must not convert a 401 into a 429 and mislead a client about why it was
+// rejected.
+func authFailureExhausted(r *http.Request, failures ratelimit.Limiter) (time.Duration, bool) {
+	if failures == nil {
+		return 0, false
+	}
+	decision, err := failures.Allow(r.Context(), authFailureBudgetKey)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "auth failure limiter failed open", "error", err)
+		return 0, false
+	}
+	if decision.Allowed {
+		return 0, false
+	}
+	return decision.RetryAfter, true
 }
 
 // rateLimit bounds request rate per credential.

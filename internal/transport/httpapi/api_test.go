@@ -30,7 +30,7 @@ type testAPI struct {
 	tenantID domain.ID
 }
 
-func newTestAPI(t *testing.T, limiter ratelimit.Limiter) *testAPI {
+func newTestAPI(t *testing.T, limiter ratelimit.Limiter, authFailures ...ratelimit.Limiter) *testAPI {
 	t.Helper()
 
 	st, tenantID := testsupport.Store(t)
@@ -49,11 +49,17 @@ func newTestAPI(t *testing.T, limiter ratelimit.Limiter) *testAPI {
 		return generated.Secret
 	}
 
+	var failureLimiter ratelimit.Limiter
+	if len(authFailures) > 0 {
+		failureLimiter = authFailures[0]
+	}
+
 	router := httpapi.NewRouter(httpapi.Deps{
-		Version:       "test",
-		Service:       svc,
-		Authenticator: apikey.New(st.APIKeys()),
-		Limiter:       limiter,
+		Version:            "test",
+		Service:            svc,
+		Authenticator:      apikey.New(st.APIKeys()),
+		Limiter:            limiter,
+		AuthFailureLimiter: failureLimiter,
 	})
 
 	server := httptest.NewServer(router)
@@ -120,6 +126,32 @@ func TestHealthEndpointsNeedNoCredential(t *testing.T) {
 	assert.Equal(t, "ok", body["status"])
 }
 
+func TestAuthFailuresAreThrottled(t *testing.T) {
+	// Two attempts allowed per window, so the third is refused.
+	failures := ratelimit.NewMemory(ratelimit.Config{RequestsPerMinute: 2, Burst: 2})
+	api := newTestAPI(t, nil, failures)
+	body := map[string]any{"candidates": []any{candidate("4012345", "Senior Software Engineer II")}}
+
+	for i := range 2 {
+		resp, _ := api.do(t, http.MethodPost, "/v1/postings:filter", "at_live_totallyfake", body)
+		assert.Equal(t, http.StatusUnauthorized, resp.StatusCode, "attempt %d is within the budget", i+1)
+	}
+
+	resp, payload := api.do(t, http.MethodPost, "/v1/postings:filter", "at_live_totallyfake", body)
+	assert.Equal(t, http.StatusTooManyRequests, resp.StatusCode,
+		"credential guessing must not be free: the limiter that keys on a principal cannot see a request that has none")
+	assert.NotEmpty(t, resp.Header.Get("Retry-After"), "a throttled client needs to know how long to wait")
+
+	errBody := decode[map[string]map[string]any](t, payload)
+	assert.Equal(t, "rate_limited", errBody["error"]["code"])
+
+	t.Run("a valid credential still works while failures are throttled", func(t *testing.T) {
+		resp, _ := api.do(t, http.MethodPost, "/v1/postings:filter", api.readKey, body)
+		assert.Equal(t, http.StatusOK, resp.StatusCode,
+			"the failure budget must never be reachable by a caller holding a real key")
+	})
+}
+
 func TestAuthentication(t *testing.T) {
 	api := newTestAPI(t, nil)
 	body := map[string]any{"candidates": []any{candidate("4012345", "Senior Software Engineer II")}}
@@ -127,8 +159,11 @@ func TestAuthentication(t *testing.T) {
 	t.Run("no credential is rejected", func(t *testing.T) {
 		resp, payload := api.do(t, http.MethodPost, "/v1/postings:filter", "", body)
 		assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
-		assert.Contains(t, resp.Header.Get("WWW-Authenticate"), "Bearer",
+		challenge := resp.Header.Get("WWW-Authenticate")
+		assert.Contains(t, challenge, "Bearer",
 			"the response must tell a client what scheme to use")
+		assert.Contains(t, challenge, "api_key",
+			"advertising api_key stops an MCP client reading a bare Bearer challenge as an OAuth invitation")
 
 		errBody := decode[map[string]map[string]any](t, payload)
 		assert.Equal(t, "unauthenticated", errBody["error"]["code"])

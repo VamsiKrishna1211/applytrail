@@ -35,6 +35,11 @@ type Deps struct {
 	// Limiter bounds request rate per credential. Nil disables limiting.
 	Limiter ratelimit.Limiter
 
+	// AuthFailureLimiter bounds how fast credentials can be guessed. It is
+	// separate from Limiter because Limiter keys on the authenticated
+	// principal, which a rejected request does not have. Nil disables it.
+	AuthFailureLimiter ratelimit.Limiter
+
 	// MCPHandler serves the Model Context Protocol endpoint. It is a plain
 	// net/http handler from the MCP SDK and mounts directly at /mcp.
 	MCPHandler http.Handler
@@ -62,7 +67,7 @@ func NewRouter(deps Deps) http.Handler {
 	if deps.MCPHandler != nil {
 		r.Group(func(r chi.Router) {
 			r.Use(otelMiddleware("mcp"))
-			r.Use(authenticate(deps.Authenticator))
+			r.Use(authenticate(deps.Authenticator, deps.AuthFailureLimiter))
 			if deps.Limiter != nil {
 				r.Use(rateLimit(deps.Limiter))
 			}
@@ -75,7 +80,7 @@ func NewRouter(deps Deps) http.Handler {
 		h := &handlers{svc: deps.Service}
 		r.Route("/v1", func(r chi.Router) {
 			r.Use(otelMiddleware("v1"))
-			r.Use(authenticate(deps.Authenticator))
+			r.Use(authenticate(deps.Authenticator, deps.AuthFailureLimiter))
 			if deps.Limiter != nil {
 				r.Use(rateLimit(deps.Limiter))
 			}
