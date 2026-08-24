@@ -55,6 +55,10 @@ type CompanyStore interface {
 	Upsert(ctx context.Context, company domain.Company) (domain.Company, error)
 	Get(ctx context.Context, tenantID, id domain.ID) (domain.Company, error)
 	GetByNormalizedName(ctx context.Context, tenantID domain.ID, normalizedName string) (domain.Company, error)
+	// FindByNormalizedNames resolves many employers at once, keyed by
+	// normalized name. The fuzzy match tier is scoped per company, so this
+	// runs once per batch instead of once per candidate.
+	FindByNormalizedNames(ctx context.Context, tenantID domain.ID, normalizedNames []string) (map[string]domain.Company, error)
 	List(ctx context.Context, tenantID domain.ID) ([]domain.Company, error)
 }
 

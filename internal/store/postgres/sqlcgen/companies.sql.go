@@ -11,6 +11,49 @@ import (
 	"github.com/google/uuid"
 )
 
+const findCompaniesByNormalizedNames = `-- name: FindCompaniesByNormalizedNames :many
+SELECT id, tenant_id, name, normalized_name, domain, careers_url, created_at, updated_at FROM companies
+WHERE tenant_id = $1
+  AND normalized_name = ANY ($2::text[])
+`
+
+type FindCompaniesByNormalizedNamesParams struct {
+	TenantID        uuid.UUID
+	NormalizedNames []string
+}
+
+// Batch variant for dedupe: the fuzzy tier is scoped per company, so the
+// engine resolves every candidate's employer in one round trip before it
+// starts comparing titles.
+func (q *Queries) FindCompaniesByNormalizedNames(ctx context.Context, arg FindCompaniesByNormalizedNamesParams) ([]Company, error) {
+	rows, err := q.db.Query(ctx, findCompaniesByNormalizedNames, arg.TenantID, arg.NormalizedNames)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Company{}
+	for rows.Next() {
+		var i Company
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Name,
+			&i.NormalizedName,
+			&i.Domain,
+			&i.CareersUrl,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getCompany = `-- name: GetCompany :one
 SELECT id, tenant_id, name, normalized_name, domain, careers_url, created_at, updated_at FROM companies WHERE id = $1 AND tenant_id = $2
 `

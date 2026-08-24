@@ -20,3 +20,11 @@ WHERE tenant_id = @tenant_id AND normalized_name = @normalized_name;
 SELECT * FROM companies
 WHERE tenant_id = @tenant_id
 ORDER BY normalized_name;
+
+-- Batch variant for dedupe: the fuzzy tier is scoped per company, so the
+-- engine resolves every candidate's employer in one round trip before it
+-- starts comparing titles.
+-- name: FindCompaniesByNormalizedNames :many
+SELECT * FROM companies
+WHERE tenant_id = @tenant_id
+  AND normalized_name = ANY (@normalized_names::text[]);

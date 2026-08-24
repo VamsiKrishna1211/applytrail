@@ -20,6 +20,10 @@ type Querier interface {
 	CreateSearchProfile(ctx context.Context, arg CreateSearchProfileParams) (SearchProfile, error)
 	CreateSearchRun(ctx context.Context, arg CreateSearchRunParams) (SearchRun, error)
 	CreateTenant(ctx context.Context, arg CreateTenantParams) (Tenant, error)
+	// Batch variant for dedupe: the fuzzy tier is scoped per company, so the
+	// engine resolves every candidate's employer in one round trip before it
+	// starts comparing titles.
+	FindCompaniesByNormalizedNames(ctx context.Context, arg FindCompaniesByNormalizedNamesParams) ([]Company, error)
 	// Fuzzy tier. The `%` operator uses the pg_trgm GIN index to shortlist
 	// plausible titles; exact scoring happens in Go, which owns the thresholds.
 	// Scoped to one company because a title alone is far too weak a signal.

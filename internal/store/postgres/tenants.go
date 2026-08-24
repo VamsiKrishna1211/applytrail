@@ -131,6 +131,24 @@ func (s companyStore) GetByNormalizedName(ctx context.Context, tenantID domain.I
 	return toDomainCompany(row), nil
 }
 
+func (s companyStore) FindByNormalizedNames(ctx context.Context, tenantID domain.ID, names []string) (map[string]domain.Company, error) {
+	if len(names) == 0 {
+		return map[string]domain.Company{}, nil
+	}
+	rows, err := s.q.FindCompaniesByNormalizedNames(ctx, sqlcgen.FindCompaniesByNormalizedNamesParams{
+		TenantID:        tenantID,
+		NormalizedNames: names,
+	})
+	if err != nil {
+		return nil, translate("find companies by name", "company", err)
+	}
+	byName := make(map[string]domain.Company, len(rows))
+	for _, row := range rows {
+		byName[row.NormalizedName] = toDomainCompany(row)
+	}
+	return byName, nil
+}
+
 func (s companyStore) List(ctx context.Context, tenantID domain.ID) ([]domain.Company, error) {
 	rows, err := s.q.ListCompanies(ctx, tenantID)
 	if err != nil {
