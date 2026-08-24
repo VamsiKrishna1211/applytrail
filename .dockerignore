@@ -1,0 +1,22 @@
+# Allowlist, not a denylist: everything is excluded, then the Go build inputs
+# are added back. A new secret file dropped in the repo root is therefore
+# excluded by default rather than requiring this file to be updated.
+*
+
+# --- build inputs ---
+!go.mod
+!go.sum
+!cmd
+!cmd/**
+!internal
+!internal/**
+!db
+!db/**
+
+# --- pared back out of the allowlist above ---
+# Tests never run in the image build, and the store tests pull testcontainers.
+**/*_test.go
+internal/testsupport
+# Only db/migrations is embedded (db/embed.go); the sqlc query sources are a
+# codegen input, not a runtime one.
+db/queries
