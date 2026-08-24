@@ -8,6 +8,11 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/VamsiKrishna1211/applytrail/internal/auth"
+	"github.com/VamsiKrishna1211/applytrail/internal/domain"
+	"github.com/VamsiKrishna1211/applytrail/internal/ratelimit"
+	"github.com/VamsiKrishna1211/applytrail/internal/service"
 )
 
 // Deps are the collaborators the router needs. Fields are added as milestones
@@ -18,6 +23,17 @@ type Deps struct {
 
 	// DB backs the readiness probe.
 	DB Pinger
+
+	// Service is the use-case layer. Handlers do nothing but translate for it.
+	Service *service.Service
+
+	// Authenticator resolves callers. The port, not the API key
+	// implementation, so a deployment can add browser login without touching
+	// a handler.
+	Authenticator auth.Authenticator
+
+	// Limiter bounds request rate per credential. Nil disables limiting.
+	Limiter ratelimit.Limiter
 
 	// MCPHandler serves the Model Context Protocol endpoint. It is a plain
 	// net/http handler from the MCP SDK and mounts directly at /mcp.
@@ -41,17 +57,71 @@ func NewRouter(deps Deps) http.Handler {
 	r.Get("/readyz", handleReady(deps.DB))
 	r.Get("/version", handleLive(deps.Version))
 
+	// The MCP endpoint authenticates and rate-limits exactly like the REST
+	// API: the transport differs, the trust boundary does not.
 	if deps.MCPHandler != nil {
-		r.Handle("/mcp", otelhttp.NewHandler(deps.MCPHandler, "mcp"))
-		r.Handle("/mcp/*", otelhttp.NewHandler(deps.MCPHandler, "mcp"))
+		r.Group(func(r chi.Router) {
+			r.Use(otelMiddleware("mcp"))
+			r.Use(authenticate(deps.Authenticator))
+			if deps.Limiter != nil {
+				r.Use(rateLimit(deps.Limiter))
+			}
+			r.Handle("/mcp", deps.MCPHandler)
+			r.Handle("/mcp/*", deps.MCPHandler)
+		})
 	}
 
-	r.Route("/v1", func(r chi.Router) {
-		r.Use(func(next http.Handler) http.Handler {
-			return otelhttp.NewHandler(nameSpanFromRoute(next), "v1")
+	if deps.Service != nil {
+		h := &handlers{svc: deps.Service}
+		r.Route("/v1", func(r chi.Router) {
+			r.Use(otelMiddleware("v1"))
+			r.Use(authenticate(deps.Authenticator))
+			if deps.Limiter != nil {
+				r.Use(rateLimit(deps.Limiter))
+			}
+
+			// Batch dedupe is read-only on purpose, so a search agent can run
+			// with a credential that cannot mutate anything.
+			r.With(requireScope(domain.ScopeRead)).Post("/postings:filter", h.handleFilterPostings)
+			r.With(requireScope(domain.ScopeWrite)).Post("/postings:ingest", h.handleIngestPostings)
+
+			r.Route("/applications", func(r chi.Router) {
+				r.With(requireScope(domain.ScopeRead)).Get("/", h.handleListApplications)
+				r.With(requireScope(domain.ScopeRead)).Get("/followups", h.handleFollowups)
+				r.With(requireScope(domain.ScopeRead)).Get("/{id}", h.handleGetApplication)
+				r.With(requireScope(domain.ScopeWrite)).Post("/", h.handleRecordApplication)
+				r.With(requireScope(domain.ScopeWrite)).Patch("/{id}", h.handleUpdateApplication)
+				r.With(requireScope(domain.ScopeWrite)).Post("/{id}/notes", h.handleAddNote)
+			})
+
+			r.Route("/search-profiles", func(r chi.Router) {
+				r.With(requireScope(domain.ScopeRead)).Get("/", h.handleListProfiles)
+				r.With(requireScope(domain.ScopeRead)).Get("/{name}", h.handleGetProfile)
+				r.With(requireScope(domain.ScopeWrite)).Post("/", h.handleCreateProfile)
+				r.With(requireScope(domain.ScopeWrite)).Patch("/{id}", h.handleUpdateProfile)
+			})
+
+			r.Route("/search-runs", func(r chi.Router) {
+				r.With(requireScope(domain.ScopeRead)).Get("/", h.handleListRuns)
+				r.With(requireScope(domain.ScopeWrite)).Post("/", h.handleStartRun)
+				r.With(requireScope(domain.ScopeWrite)).Patch("/{id}", h.handleFinishRun)
+			})
+
+			r.Route("/contacts", func(r chi.Router) {
+				r.With(requireScope(domain.ScopeRead)).Get("/", h.handleListContacts)
+				r.With(requireScope(domain.ScopeWrite)).Post("/", h.handleUpsertContact)
+			})
+
+			r.With(requireScope(domain.ScopeRead)).Get("/stats", h.handleStats)
+
+			r.Route("/admin/api-keys", func(r chi.Router) {
+				r.Use(requireScope(domain.ScopeAdmin))
+				r.Get("/", h.handleListKeys)
+				r.Post("/", h.handleCreateKey)
+				r.Delete("/{id}", h.handleRevokeKey)
+			})
 		})
-		// REST routes are registered here as milestone M3 lands.
-	})
+	}
 
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, r, http.StatusNotFound, errorBody{Error: errorDetail{
@@ -67,6 +137,14 @@ func NewRouter(deps Deps) http.Handler {
 	})
 
 	return r
+}
+
+// otelMiddleware instruments a route group and names its spans after the
+// matched chi pattern.
+func otelMiddleware(operation string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return otelhttp.NewHandler(nameSpanFromRoute(next), operation)
+	}
 }
 
 // nameSpanFromRoute renames the active span to chi's matched route pattern,
