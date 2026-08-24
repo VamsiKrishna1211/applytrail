@@ -63,6 +63,25 @@ paths:
         "200": { description: ready }
         "503": { description: a dependency is unreachable }
 
+  /version:
+    get:
+      summary: Build version
+      description: |
+        The quickest way to confirm which revision is actually serving traffic.
+        Identical in shape to /healthz.
+      security: []
+      tags: [admin]
+      responses:
+        "200":
+          description: the running build
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  version: { type: string }
+
   /v1/postings:filter:
     post:
       operationId: filterPostings
@@ -335,11 +354,39 @@ paths:
                   last_run_at: { type: string, format: date-time }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /v1/search-profiles/{id}:
+    patch:
+      operationId: updateSearchProfile
+      summary: Update a targeting profile
+      tags: [search]
+      description: |
+        Partial. An omitted field is left unchanged; a field set to an empty
+        array clears it. Addressed by id rather than name, because a rename is
+        one of the things this endpoint can do.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SearchProfileUpdate" }
+      responses:
+        "200":
+          description: the updated profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SearchProfile" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /v1/search-runs:
     get:
       operationId: listSearchRuns
       summary: Audit of executed searches
       tags: [search]
+      parameters:
+        - { name: since, in: query, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, default: 25 } }
       responses:
         "200":
           description: runs
@@ -371,6 +418,31 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SearchRun" }
+
+  /v1/search-runs/{id}:
+    patch:
+      operationId: finishSearchRun
+      summary: Close a search run
+      tags: [search]
+      description: |
+        The counters are accumulated by postings:filter as the run proceeds;
+        this only stamps finished_at and records any closing notes.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                notes: { type: string }
+      responses:
+        "200":
+          description: the closed run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SearchRun" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /v1/contacts:
     get:
@@ -775,6 +847,27 @@ components:
         name: { type: string }
         description: { type: string }
         active: { type: boolean, default: true }
+        keywords: { type: array, items: { type: string } }
+        titles: { type: array, items: { type: string } }
+        locations: { type: array, items: { type: string } }
+        remote_only: { type: boolean }
+        min_compensation: { type: integer, format: int64 }
+        currency: { type: string }
+        seniority: { type: array, items: { type: string } }
+        company_allowlist: { type: array, items: { type: string } }
+        company_blocklist: { type: array, items: { type: string } }
+        exclude_keywords: { type: array, items: { type: string } }
+        resurface_policy:
+          type: object
+          additionalProperties: { type: integer }
+          description: per-status cooldown in days; -1 means never
+
+    SearchProfileUpdate:
+      type: object
+      description: Every field optional. Omitted means unchanged.
+      properties:
+        description: { type: string }
+        active: { type: boolean }
         keywords: { type: array, items: { type: string } }
         titles: { type: array, items: { type: string } }
         locations: { type: array, items: { type: string } }

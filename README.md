@@ -122,7 +122,7 @@ claude mcp add --transport http applytrail https://<your-host>/mcp \
 The key may also travel in an `X-Api-Key` header, carrying the bare token with
 no scheme. That exists for clients which reserve `Authorization` for their own
 OAuth token and will not let you set it — claude.ai's custom connector is one.
-See [`docs/MCP.md`](docs/MCP.md).
+See [MCP tools](docs/MCP.md).
 
 Nine tools, shaped around the steps of a search run rather than mirroring the
 REST endpoints:
@@ -142,7 +142,7 @@ REST endpoints:
 A read-only credential is enough to check for duplicates, so a search agent
 needs no write access to do its main job.
 
-See [`docs/ROUTINE.md`](docs/ROUTINE.md) for a complete routine prompt.
+See [Cloud routines](docs/ROUTINE.md) for a complete routine prompt.
 
 ## Architecture
 
@@ -167,19 +167,27 @@ magic, no ORM.
 
 ## Documentation
 
+**[vamsikrishna1211.github.io/applytrail](https://vamsikrishna1211.github.io/applytrail/)**
+— the same Markdown as below, with navigation.
+
 | | |
 |---|---|
-| [`docs/DEDUPE.md`](docs/DEDUPE.md) | how matching works, and why each rule is the way it is |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | layers, ports, and the decisions behind them |
-| [`docs/MCP.md`](docs/MCP.md) | the tool surface, and connecting an agent to it |
-| [`docs/ROUTINE.md`](docs/ROUTINE.md) | driving it from a Claude Code cloud routine |
-| [`docs/DEPLOY.md`](docs/DEPLOY.md) | running it for $0 |
-| [`api/openapi.yaml`](api/openapi.yaml) | the REST surface |
+| [Getting started](docs/GETTING-STARTED.md) | from a fresh clone to a deduped posting in five minutes |
+| [Configuration](docs/CONFIGURATION.md) | every environment variable, its default, and its bounds |
+| [Deduplication](docs/DEDUPE.md) | how matching works, and why each rule is the way it is |
+| [Data model](docs/DATA-MODEL.md) | entities, the status graph, and the event timeline |
+| [Architecture](docs/ARCHITECTURE.md) | layers, ports, and the decisions behind them |
+| [REST API](docs/API.md) | every endpoint, its scope, and the error envelope |
+| [MCP tools](docs/MCP.md) | the tool surface, and connecting an agent to it |
+| [CLI](docs/CLI.md) | migrations, tenants, credentials, and profiles |
+| [Deployment](docs/DEPLOY.md) | running it for $0, and hardening it |
+| [Cloud routines](docs/ROUTINE.md) | driving it from a scheduled Claude Code session |
+| [`api/openapi.yaml`](api/openapi.yaml) | the machine-readable REST contract |
 
 ## Deployment
 
 One container, one Postgres, designed to cost nothing: Cloud Run scales to zero
-and Neon's free tier has no expiry. See [`docs/DEPLOY.md`](docs/DEPLOY.md).
+and Neon's free tier has no expiry. See [Deployment](docs/DEPLOY.md).
 
 ## Testing
 
@@ -198,11 +206,11 @@ Adding support for a job board is one entry in the extractor table in
 [`internal/dedupe/ats.go`](internal/dedupe/ats.go) plus one test case. That is
 the design working as intended.
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+See [CONTRIBUTING](docs/CONTRIBUTING.md).
 
 ## Security
 
-Report vulnerabilities privately — see [`SECURITY.md`](SECURITY.md), which also
+Report vulnerabilities privately — see [SECURITY](docs/SECURITY.md), which also
 describes the trust model and the two deployment settings most worth getting
 right.
 

@@ -1,3 +1,7 @@
+---
+title: Security
+---
+
 # Security
 
 ## Reporting a vulnerability
@@ -43,7 +47,7 @@ that has no valid credential.
 ## Deploying it safely
 
 The two things most likely to bite, both covered in
-[docs/DEPLOY.md](docs/DEPLOY.md#hardening):
+[the deployment guide](DEPLOY.md#hardening):
 
 **Do not point `APPLYTRAIL_DATABASE_URL` at the database owner role.** Managed
 Postgres hands you an owner credential by default. ApplyTrail needs only DML at

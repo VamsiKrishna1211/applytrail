@@ -1,0 +1,60 @@
+# The navigation for the documentation site. Order here is the order in the
+# sidebar and the order the prev/next links walk, so a reader who follows
+# "next" from the overview passes every page exactly once.
+#
+# `page` matches the source filename, which is how the layout decides which
+# link is the current one. Keep it in sync when a file is renamed.
+- title: Start here
+  items:
+    - page: index.md
+      url: /
+      title: Overview
+      blurb: what ApplyTrail is and why dedupe is the hard part
+    - page: GETTING-STARTED.md
+      title: Getting started
+      blurb: from a fresh clone to a deduped posting in five minutes
+    - page: CONFIGURATION.md
+      title: Configuration
+      blurb: every environment variable, its default, and its bounds
+
+- title: Concepts
+  items:
+    - page: DEDUPE.md
+      title: Deduplication
+      blurb: the five tiers, normalization, and resurfacing policy
+    - page: DATA-MODEL.md
+      title: Data model
+      blurb: entities, the status graph, and the event timeline
+    - page: ARCHITECTURE.md
+      title: Architecture
+      blurb: layers, ports, and the decisions behind them
+
+- title: Reference
+  items:
+    - page: API.md
+      title: REST API
+      blurb: every endpoint, its scope, and the error envelope
+    - page: MCP.md
+      title: MCP tools
+      blurb: the nine tools and how to connect an agent
+    - page: CLI.md
+      title: CLI
+      blurb: migrations, tenants, credentials, and profiles
+
+- title: Operate
+  items:
+    - page: DEPLOY.md
+      title: Deployment
+      blurb: Cloud Run and Neon, for nothing a month
+    - page: ROUTINE.md
+      title: Cloud routines
+      blurb: driving a search from a scheduled Claude Code session
+    - page: SECURITY.md
+      title: Security
+      blurb: the trust model, and reporting a vulnerability
+
+- title: Project
+  items:
+    - page: CONTRIBUTING.md
+      title: Contributing
+      blurb: adding a job board, changing the schema, running the tests

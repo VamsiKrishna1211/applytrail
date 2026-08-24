@@ -1,3 +1,7 @@
+---
+title: Deployment
+---
+
 # Deployment
 
 ApplyTrail is one container plus one Postgres. It is built to run at zero cost.

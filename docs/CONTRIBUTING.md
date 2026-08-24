@@ -1,3 +1,7 @@
+---
+title: Contributing
+---
+
 # Contributing
 
 ## Setup
@@ -62,6 +66,29 @@ verified.
 
 Optional query parameters need `sqlc.narg('name')::type`, not `@name`. Plain
 `@name` generates a non-pointer field, which cannot express "leave unchanged".
+
+## The documentation
+
+The pages in `docs/` are the GitHub Pages site as well as the Markdown GitHub
+renders, so there is exactly one copy of everything. Preview it before pushing:
+
+```bash
+make docs        # http://localhost:4000, with live reload
+```
+
+It runs in a container against the pinned `github-pages` gem, which is the same
+Jekyll and the same plugin set the Actions build uses — so what you see locally
+is what deploys. The first run installs gems into a named volume; later runs
+start immediately.
+
+Adding a page means adding it to `docs/_data/nav.yml`. That file drives the
+sidebar, the ordering, and the previous/next links, so a page missing from it is
+a page nobody can reach. Front matter carries only `title`, because everything
+else the layout needs comes from the nav entry.
+
+Links between pages are written as `.md` and rewritten to `.html` at build time
+by `jekyll-relative-links`, which is what lets the same link work on GitHub and
+on the site. Write `[Deployment](DEPLOY.md)`, never `DEPLOY.html`.
 
 ## Tests
 

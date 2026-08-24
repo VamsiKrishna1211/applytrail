@@ -1,3 +1,7 @@
+---
+title: Deduplication
+---
+
 # How deduplication works
 
 ApplyTrail answers one question: **have I seen this job before?**

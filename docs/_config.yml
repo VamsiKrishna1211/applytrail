@@ -2,7 +2,11 @@
 # repository serves, so there is exactly one copy of the documentation.
 title: ApplyTrail
 description: A job application registry with a real dedupe engine, built for agent-driven job searches.
-theme: jekyll-theme-cayman
+repository_url: https://github.com/VamsiKrishna1211/applytrail
+
+# No theme gem. The layout in _layouts and the stylesheet in assets are the
+# whole design, which keeps the site's appearance reviewable in this repo
+# rather than inherited from a dependency.
 
 # jekyll-relative-links rewrites the .md links these pages use for GitHub's own
 # renderer into .html, so the same source works in both places.
@@ -11,6 +15,23 @@ plugins:
 relative_links:
   enabled: true
   collections: false
+
+# Every page uses the documentation chrome. Pages still need front matter for
+# Jekyll to process them at all; keeping it to `title` means GitHub's own
+# renderer shows one small metadata row instead of a block.
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
+
+kramdown:
+  input: GFM
+  auto_ids: true
+  syntax_highlighter: rouge
+  syntax_highlighter_opts:
+    block:
+      line_numbers: false
 
 exclude:
   - Gemfile

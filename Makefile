@@ -108,9 +108,21 @@ fmt:
 ## check: fmt + lint + short tests, what CI runs
 check: fmt lint test-short
 
+## docs: preview the documentation site locally on port 4000
+# Runs in a container because the site is built by GitHub's Ruby, not the one
+# on this machine, and because macOS ships a Ruby too old for the gem set.
+# The named volume caches gems so only the first run pays for bundle install.
+docs:
+	docker run --rm -it \
+	  -v "$(CURDIR)/docs":/site -w /site \
+	  -v applytrail-docs-gems:/usr/local/bundle \
+	  -p 4000:4000 -p 35729:35729 \
+	  ruby:3.3 sh -c "bundle install && bundle exec jekyll serve \
+	    --host 0.0.0.0 --livereload --force_polling"
+
 ## docker-build: build the production container image
 docker-build:
 	docker build -f deploy/Dockerfile -t applytrail:$(VERSION) .
 
-.PHONY: help tools up down nuke psql migrate migrate-down migrate-status migrate-new bootstrap \
+.PHONY: help docs tools up down nuke psql migrate migrate-down migrate-status migrate-new bootstrap \
         sqlc build run test test-short cover lint fmt check docker-build

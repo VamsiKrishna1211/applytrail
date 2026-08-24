@@ -1,0 +1,10 @@
+# Only for previewing the site locally. GitHub Pages builds from the Actions
+# workflow, not from this file, so pinning `github-pages` is what keeps a local
+# preview honest: it resolves to the same Jekyll and the same plugin set the
+# build actually uses.
+source "https://rubygems.org"
+
+gem "github-pages", group: :jekyll_plugins
+
+# Not a default gem since Ruby 3.0, and `jekyll serve` needs it.
+gem "webrick", "~> 1.8"

@@ -1,3 +1,7 @@
+---
+title: Cloud routines
+---
+
 # Driving ApplyTrail from a Claude Code cloud routine
 
 ## Connect

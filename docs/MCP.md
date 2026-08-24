@@ -1,3 +1,7 @@
+---
+title: MCP tools
+---
+
 # The MCP surface
 
 ApplyTrail speaks the Model Context Protocol over streamable HTTP at `/mcp`. It
