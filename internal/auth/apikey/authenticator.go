@@ -105,7 +105,7 @@ func (a *Authenticator) recordUsage(ctx context.Context, id domain.ID, at time.T
 // Some MCP clients reserve Authorization for their own OAuth token and will not
 // let a user set it; claude.ai's custom connector is one. They offer a short
 // list of alternative header names instead, of which this is the most common.
-const apiKeyHeader = "X-Api-Key"
+const apiKeyHeader = "X-Api-Key" //nolint:gosec // a header name, not a credential
 
 // credentialToken extracts the credential from the request.
 //
