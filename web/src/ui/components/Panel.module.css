@@ -1,0 +1,23 @@
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
+}
+
+.padded {
+  padding: 1.1rem 1.15rem 1.25rem;
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  gap: .7rem;
+  margin-bottom: .85rem;
+}
+
+.aside {
+  margin-left: auto;
+  font-size: .8rem;
+  color: var(--muted);
+}

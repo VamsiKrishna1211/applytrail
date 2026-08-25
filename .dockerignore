@@ -12,6 +12,10 @@
 !internal/**
 !db
 !db/**
+# The browser client is a build stage of its own; api/openapi.yaml is not
+# needed because src/api/schema.d.ts is generated from it and committed.
+!web
+!web/**
 
 # --- pared back out of the allowlist above ---
 # Tests never run in the image build, and the store tests pull testcontainers.
@@ -20,3 +24,12 @@ internal/testsupport
 # Only db/migrations is embedded (db/embed.go); the sqlc query sources are a
 # codegen input, not a runtime one.
 db/queries
+# Installed and built inside the image, never copied into it. node_modules in
+# particular is both enormous and platform-specific to the host that made it.
+web/node_modules
+web/dist
+web/*.tsbuildinfo
+# A local `make web` leaves a bundle here. The image builds its own in the web
+# stage and copies it over this path, so shipping the local one would only
+# risk a stale bundle winning a cache lookup.
+internal/transport/webui/dist

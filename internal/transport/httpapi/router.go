@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -43,6 +44,15 @@ type Deps struct {
 	// MCPHandler serves the Model Context Protocol endpoint. It is a plain
 	// net/http handler from the MCP SDK and mounts directly at /mcp.
 	MCPHandler http.Handler
+
+	// WebUI serves the browser client from the embedded bundle. Nil means the
+	// binary was built without one, and every unmatched path stays a JSON 404
+	// exactly as it was before the UI existed.
+	//
+	// It is deliberately unauthenticated: it serves a static document and
+	// nothing else. The credential is supplied by the person using it and
+	// spent on /v1, which authenticates as it always has.
+	WebUI http.Handler
 }
 
 // NewRouter assembles the HTTP surface: health probes, the versioned REST API,
@@ -128,12 +138,7 @@ func NewRouter(deps Deps) http.Handler {
 		})
 	}
 
-	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, r, http.StatusNotFound, errorBody{Error: errorDetail{
-			Code:    "not_found",
-			Message: "no route matches " + r.Method + " " + r.URL.Path,
-		}})
-	})
+	r.NotFound(notFound(deps.WebUI))
 	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, r, http.StatusMethodNotAllowed, errorBody{Error: errorDetail{
 			Code:    "method_not_allowed",
@@ -142,6 +147,38 @@ func NewRouter(deps Deps) http.Handler {
 	})
 
 	return r
+}
+
+// apiPrefixes are the paths that belong to a machine surface. A miss under one
+// of them is a routing mistake and must read as one, in the same JSON envelope
+// as every other API error — never as the browser client's index document.
+var apiPrefixes = []string{"/v1", "/mcp", "/healthz", "/readyz", "/version"}
+
+// notFound answers an unmatched path.
+//
+// With no UI compiled in, or on any API path, it is the JSON envelope. With a
+// UI, every other path is handed to the client router, because a deep link
+// like /pipeline is a real page that only the browser knows how to resolve.
+func notFound(ui http.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if ui != nil && !isAPIPath(r.URL.Path) {
+			ui.ServeHTTP(w, r)
+			return
+		}
+		writeJSON(w, r, http.StatusNotFound, errorBody{Error: errorDetail{
+			Code:    "not_found",
+			Message: "no route matches " + r.Method + " " + r.URL.Path,
+		}})
+	}
+}
+
+func isAPIPath(path string) bool {
+	for _, prefix := range apiPrefixes {
+		if path == prefix || strings.HasPrefix(path, prefix+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // otelMiddleware instruments a route group and names its spans after the
