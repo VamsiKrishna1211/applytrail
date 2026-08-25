@@ -20,7 +20,13 @@
   flex-wrap: wrap;
 }
 
-.subject { min-width: 15rem; }
+/* Capped as well as floored: the posting link below it is a whole URL, and
+ * without a ceiling one long enough would push the move chips onto their own
+ * row on a board that has the width for both. */
+.subject {
+  min-width: 15rem;
+  max-width: 26rem;
+}
 
 .name {
   font-size: .92rem;
@@ -29,6 +35,24 @@
 
 .current {
   font-size: .82rem;
+  color: var(--muted);
+}
+
+/* One line, truncated: the `title` carries the whole URL for anyone who needs
+ * to read it, and the label already drops the scheme. */
+.link {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: .8rem;
+  color: var(--accent);
+}
+
+.link:hover { text-decoration: underline; }
+
+.noLink {
+  font-size: .8rem;
   color: var(--muted);
 }
 

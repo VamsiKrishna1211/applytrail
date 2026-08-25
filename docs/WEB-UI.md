@@ -165,6 +165,14 @@ This is a convenience, not an authority. The service still validates every
 transition, and a card that moved in another tab produces a `409` that the UI
 reports rather than swallows.
 
+The bar also carries the posting's link, beside the company and the current
+status, so which listing a card stands for is visible at the moment you decide
+where it goes. The URL is free text whoever recorded the application supplied,
+so `postingLink` in `web/src/ui/format.ts` parses it and renders a link only
+for `http` and `https` — a `javascript:` URL becomes no link at all. The label
+drops the scheme and any leading `www.` and truncates; the full URL is the
+`title`. A posting with no usable link says so rather than showing nothing.
+
 The client's copy of the graph lives in `web/src/core/domain/status.ts` and is
 compared against `internal/domain/application.go` by a Go test. Change the Go
 file first; the test names the mismatch if you forget the other.
