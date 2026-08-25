@@ -5,7 +5,8 @@
 📖 **[Documentation](https://vamsikrishna1211.github.io/applytrail/)** ·
 [Getting started](https://vamsikrishna1211.github.io/applytrail/GETTING-STARTED.html) ·
 [REST API](https://vamsikrishna1211.github.io/applytrail/API.html) ·
-[MCP tools](https://vamsikrishna1211.github.io/applytrail/MCP.html)
+[MCP tools](https://vamsikrishna1211.github.io/applytrail/MCP.html) ·
+[Web UI](https://vamsikrishna1211.github.io/applytrail/WEB-UI.html)
 
 If you have an agent — a Claude Code cloud routine, a cron script, anything —
 searching job boards on a schedule, it has no memory between runs. It
@@ -117,6 +118,27 @@ curl -s localhost:8080/v1/postings:filter -H "Authorization: Bearer $KEY" \
 
 `make help` lists every task.
 
+## Browser UI
+
+Optional, and off by default. A single-page client for the pipeline — the
+funnel, the follow-up queue, a board whose moves are the ones the API accepts,
+and an application's event timeline.
+
+```bash
+make web-install     # once
+make run-all         # builds the client into the binary, serves it on :8080
+```
+
+It calls the same `/v1` endpoints an agent calls and holds no rules of its own.
+Sign in with a key scoped `read,write` — never `admin`:
+
+```bash
+go run ./cmd/applytrail apikey create --label browser-ui --scopes read,write
+```
+
+`make run` still builds and serves the API alone. See
+[Web UI](https://vamsikrishna1211.github.io/applytrail/WEB-UI.html).
+
 ## Connect an agent
 
 ```bash
@@ -188,6 +210,7 @@ copy of each.
 | [REST API](https://vamsikrishna1211.github.io/applytrail/API.html) | every endpoint, its scope, and the error envelope |
 | [MCP tools](https://vamsikrishna1211.github.io/applytrail/MCP.html) | the tool surface, and connecting an agent to it |
 | [CLI](https://vamsikrishna1211.github.io/applytrail/CLI.html) | migrations, tenants, credentials, and profiles |
+| [Web UI](https://vamsikrishna1211.github.io/applytrail/WEB-UI.html) | the browser client, how it authenticates, and how it is embedded |
 | [Deployment](https://vamsikrishna1211.github.io/applytrail/DEPLOY.html) | running it for $0, and hardening it |
 | [Cloud routines](https://vamsikrishna1211.github.io/applytrail/ROUTINE.html) | driving it from a scheduled Claude Code session |
 | [Security](https://vamsikrishna1211.github.io/applytrail/SECURITY.html) | the trust model, and reporting a vulnerability |

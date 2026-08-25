@@ -1,0 +1,55 @@
+.timeline {
+  display: flex;
+  flex-direction: column;
+}
+
+.entry {
+  display: flex;
+  gap: .85rem;
+  align-items: flex-start;
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  align-self: stretch;
+  padding-top: .45rem;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--tone-ink);
+  flex-shrink: 0;
+}
+
+.line {
+  flex-grow: 1;
+  width: 1px;
+  background: var(--line);
+}
+
+.body {
+  flex-grow: 1;
+  min-width: 0;
+  padding-bottom: .8rem;
+}
+
+.headline {
+  font-size: .88rem;
+  color: var(--ink);
+}
+
+.meta {
+  display: flex;
+  gap: .6rem;
+  margin-top: .05rem;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: .74rem;
+}
+
+.when { color: var(--muted); }
+.actor { color: var(--ink-2); }

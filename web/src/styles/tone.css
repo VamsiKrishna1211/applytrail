@@ -1,0 +1,36 @@
+/* Tone.
+ *
+ * A status has one meaning and several surfaces: chip, dot, bar, button. Each
+ * `data-tone` sets three variables and every component reads those, so adding
+ * a tone is one block here and no edit anywhere else.
+ */
+
+[data-tone] {
+  --tone-ink: var(--muted);
+  --tone-soft: var(--sunk);
+  --tone-line: var(--line);
+}
+
+[data-tone='accent'] {
+  --tone-ink: var(--accent);
+  --tone-soft: var(--accent-soft);
+  --tone-line: var(--accent-line);
+}
+
+[data-tone='ok'] {
+  --tone-ink: var(--ok);
+  --tone-soft: var(--ok-soft);
+  --tone-line: var(--ok-line);
+}
+
+[data-tone='warn'] {
+  --tone-ink: var(--warn);
+  --tone-soft: var(--warn-soft);
+  --tone-line: var(--warn-line);
+}
+
+[data-tone='stop'] {
+  --tone-ink: var(--stop);
+  --tone-soft: var(--stop-soft);
+  --tone-line: var(--stop-line);
+}

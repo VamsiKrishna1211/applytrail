@@ -1,0 +1,75 @@
+.bar {
+  padding: .9rem 1.1rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
+}
+
+.armed { border-color: var(--accent-line); }
+
+.idle {
+  font-size: .88rem;
+  color: var(--muted);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.subject { min-width: 15rem; }
+
+.name {
+  font-size: .92rem;
+  font-weight: 640;
+}
+
+.current {
+  font-size: .82rem;
+  color: var(--muted);
+}
+
+.moves {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+
+.chip {
+  padding: .3rem .75rem;
+  border-radius: 7px;
+  font-size: .85rem;
+  font-weight: 600;
+  color: var(--tone-ink);
+  background: var(--tone-soft);
+  border: 1px solid var(--tone-line);
+}
+
+.chip:hover:not(:disabled) { filter: brightness(.97); }
+.chip:disabled { opacity: .55; }
+
+.terminal {
+  font-size: .85rem;
+  color: var(--stop);
+}
+
+.deselect {
+  margin-left: auto;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  font-size: .82rem;
+}
+
+.hint {
+  margin-top: .55rem;
+  font-size: .8rem;
+  color: var(--muted);
+}
+
+.failure { margin-top: .7rem; }

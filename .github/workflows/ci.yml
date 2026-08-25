@@ -46,6 +46,46 @@ jobs:
         # tests run here alongside the unit tests.
         run: go test ./... -race -count=1
 
+  web:
+    name: browser client
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: install
+        run: npm ci
+        working-directory: web
+
+      - name: verify the generated API types match api/openapi.yaml
+        # src/api/schema.d.ts is committed so the image build needs no
+        # generator. That only holds if it is regenerated when the document
+        # changes, which is what this checks.
+        run: |
+          npm run api
+          git diff --exit-code -- src/api/schema.d.ts
+        working-directory: web
+
+      - name: typecheck and build
+        run: npm run build
+        working-directory: web
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: build the server with the client embedded
+        run: go build -tags webui ./...
+
+      - name: test the embedded bundle actually serves
+        run: go test -tags webui ./internal/transport/webui/... -count=1
+
   lint:
     name: lint
     runs-on: ubuntu-latest

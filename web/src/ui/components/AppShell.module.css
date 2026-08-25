@@ -1,0 +1,91 @@
+.shell {
+  min-height: 100vh;
+  background: var(--paper);
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  height: var(--topbar-h);
+  padding: 0 var(--gutter);
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  font-weight: 650;
+  letter-spacing: -.01em;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.mark {
+  width: .95rem;
+  height: .95rem;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+.nav {
+  display: flex;
+  gap: 1.25rem;
+  margin-left: 1.5rem;
+  font-size: .9rem;
+}
+
+.nav a {
+  color: var(--muted);
+  text-decoration: none;
+  padding-bottom: .15rem;
+  border-bottom: 2px solid transparent;
+}
+
+.nav a:hover { color: var(--ink-2); }
+
+.nav a[aria-current='page'] {
+  color: var(--ink);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
+.credential {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+}
+
+.token {
+  font-family: var(--mono);
+  font-size: .78rem;
+  color: var(--muted);
+  padding: .2rem .5rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--code-bg);
+}
+
+.signout {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  font-size: .82rem;
+}
+
+.main {
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: 2rem var(--gutter) 3rem;
+}
+
+.wide {
+  max-width: none;
+}

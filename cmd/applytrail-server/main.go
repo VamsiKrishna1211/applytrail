@@ -22,6 +22,7 @@ import (
 	"github.com/VamsiKrishna1211/applytrail/internal/store/postgres"
 	"github.com/VamsiKrishna1211/applytrail/internal/transport/httpapi"
 	"github.com/VamsiKrishna1211/applytrail/internal/transport/mcpserver"
+	"github.com/VamsiKrishna1211/applytrail/internal/transport/webui"
 )
 
 // version is set at build time via -ldflags.
@@ -106,7 +107,11 @@ func run() error {
 			Burst:             authFailureBurst,
 		}),
 		MCPHandler: mcpserver.New(svc, version).Handler(),
+		// Nil unless the binary was built with `-tags webui`, in which case
+		// every unmatched path stays a JSON 404.
+		WebUI: webui.Handler(),
 	})
+	slog.Info("web ui", "embedded", webui.Available())
 
 	server := &http.Server{
 		Addr:              cfg.Addr,

@@ -1,0 +1,56 @@
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+  padding: .7rem .9rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  text-align: left;
+}
+
+.row:hover { border-color: var(--line-2); }
+
+.identity {
+  flex-grow: 1;
+  min-width: 0;
+}
+
+.company {
+  font-size: .92rem;
+  font-weight: 640;
+  letter-spacing: -.008em;
+}
+
+.title {
+  font-size: .85rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timing {
+  width: 6.6rem;
+  flex-shrink: 0;
+  text-align: right;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.overdue {
+  font-size: .85rem;
+  color: var(--tone-ink);
+}
+
+.since {
+  font-size: .74rem;
+  color: var(--muted);
+}

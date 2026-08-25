@@ -1,0 +1,56 @@
+.empty {
+  padding: 1.6rem 1rem;
+  border: 1px dashed var(--line-2);
+  border-radius: 10px;
+  text-align: center;
+  font-size: .88rem;
+  color: var(--muted);
+}
+
+.error {
+  padding: .9rem 1.05rem;
+  border: 1px solid var(--stop-line);
+  border-left: 3px solid var(--stop);
+  border-radius: 0 9px 9px 0;
+  background: var(--stop-soft);
+  font-size: .9rem;
+  color: var(--ink);
+}
+
+.errorHead {
+  display: flex;
+  align-items: baseline;
+  gap: .5rem;
+}
+
+.code {
+  font-family: var(--mono);
+  font-size: .78rem;
+  color: var(--stop);
+}
+
+.details {
+  margin: .45rem 0 0;
+  padding-left: 1.1rem;
+  font-size: .85rem;
+  color: var(--ink-2);
+}
+
+.requestId {
+  margin-top: .45rem;
+  font-family: var(--mono);
+  font-size: .74rem;
+  color: var(--muted);
+}
+
+.skeleton {
+  border-radius: 8px;
+  background: linear-gradient(90deg, var(--sunk), var(--line), var(--sunk));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}

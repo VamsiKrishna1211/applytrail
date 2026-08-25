@@ -1,0 +1,57 @@
+.table {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) repeat(4, minmax(0, .5fr)) minmax(0, 1.2fr);
+  gap: .5rem 1rem;
+  align-items: center;
+}
+
+.head {
+  font-size: .72rem;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.numHead { text-align: right; }
+
+.cell {
+  padding-top: .35rem;
+  border-top: 1px solid var(--sunk);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: .88rem;
+  color: var(--ink-2);
+}
+
+.name { color: var(--ink); }
+.num { text-align: right; }
+
+.rate {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding-top: .35rem;
+  border-top: 1px solid var(--sunk);
+}
+
+.track {
+  flex-grow: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--sunk);
+}
+
+.bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+.pct {
+  width: 2.8rem;
+  text-align: right;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: .85rem;
+  color: var(--ink);
+}

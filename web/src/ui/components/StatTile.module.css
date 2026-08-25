@@ -1,0 +1,32 @@
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+@media (max-width: 60rem) {
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.tile {
+  padding: .95rem 1.05rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
+}
+
+.value {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 1.9rem;
+  line-height: 1.25;
+  font-weight: 600;
+  letter-spacing: -.02em;
+  color: var(--tone-ink);
+}
+
+.hint {
+  font-size: .8rem;
+  color: var(--muted);
+}

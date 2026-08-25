@@ -1,0 +1,74 @@
+/* Design tokens.
+ *
+ * Colour, type and spacing are lifted verbatim from docs/assets/css/docs.css,
+ * so the app and the documentation site are the same product. As there, the
+ * dark block redefines only tokens: nothing below this file needs to know
+ * which scheme is active.
+ */
+
+:root {
+  --paper:      #fbfcfb;
+  --surface:    #ffffff;
+  --sunk:       #f1f5f3;
+  --ink:        #131917;
+  --ink-2:      #41504c;
+  --muted:      #66756f;
+  --line:       #e0e7e3;
+  --line-2:     #cfd9d4;
+  --accent:     #0d6b62;
+  --accent-2:   #0a544d;
+  --accent-soft:#e2f0ed;
+  --accent-line:#cfe3df;
+  --ok:         #1c7a4f;
+  --ok-soft:    #e4f2ea;
+  --ok-line:    #c7e2d3;
+  --warn:       #8a5814;
+  --warn-soft:  #f6efe2;
+  --warn-line:  #e6d6b8;
+  --stop:       #a63a31;
+  --stop-soft:  #f9e9e7;
+  --stop-line:  #eccfc9;
+  --code-bg:    #f5f8f6;
+  --shadow:     0 1px 2px rgba(19, 25, 23, .05), 0 8px 24px -16px rgba(19, 25, 23, .25);
+  --shadow-sm:  0 1px 2px rgba(19, 25, 23, .05);
+  --shadow-lg:  -24px 0 48px -32px rgba(19, 25, 23, .35);
+
+  --topbar-h: 3.5rem;
+  --gutter:   2rem;
+  --page-max: 1280px;
+
+  --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+          "Liberation Mono", monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper:      #0d1211;
+    --surface:    #121918;
+    --sunk:       #171f1d;
+    --ink:        #e5ebe8;
+    --ink-2:      #bcc7c3;
+    --muted:      #8b9a95;
+    --line:       #212b28;
+    --line-2:     #2d3a36;
+    --accent:     #5ed6c5;
+    --accent-2:   #8ae9dc;
+    --accent-soft:#102f2b;
+    --accent-line:#1c4a44;
+    --ok:         #5fce97;
+    --ok-soft:    #10281d;
+    --ok-line:    #1d4433;
+    --warn:       #dfae62;
+    --warn-soft:  #2a2213;
+    --warn-line:  #4a3c1f;
+    --stop:       #f0857b;
+    --stop-soft:  #2d1815;
+    --stop-line:  #4d2823;
+    --code-bg:    #0f1615;
+    --shadow:     0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -16px rgba(0, 0, 0, .8);
+    --shadow-sm:  0 1px 2px rgba(0, 0, 0, .4);
+    --shadow-lg:  -24px 0 48px -32px rgba(0, 0, 0, .8);
+  }
+}

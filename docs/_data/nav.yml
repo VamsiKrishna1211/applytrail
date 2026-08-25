@@ -40,6 +40,9 @@
     - page: CLI.md
       title: CLI
       blurb: migrations, tenants, credentials, and profiles
+    - page: WEB-UI.md
+      title: Web UI
+      blurb: the browser client, how it authenticates, and how it is embedded
 
 - title: Operate
   items:
