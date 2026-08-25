@@ -1,0 +1,132 @@
+.search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  width: min(24rem, 32vw);
+  margin-left: 1.5rem;
+  padding: .3rem .45rem .3rem .65rem;
+  background: var(--sunk);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.search:focus-within {
+  background: var(--surface);
+  border-color: var(--accent);
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  font-size: .85rem;
+  color: var(--ink);
+}
+
+.input:focus { outline: none; }
+
+.input::-webkit-search-cancel-button { display: none; }
+
+.hint {
+  font-family: var(--mono);
+  font-size: .7rem;
+  color: var(--muted);
+  padding: 0 .3rem;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+}
+
+.clear {
+  border: 0;
+  background: transparent;
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--muted);
+  padding: 0 .2rem;
+}
+
+/* The panel hangs below the topbar, which is sticky and already above the
+   page; it needs its own stacking so nothing on the page draws over it. */
+.panel {
+  position: absolute;
+  top: calc(100% + .4rem);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  max-height: 24rem;
+  overflow-y: auto;
+  padding: .3rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  width: 100%;
+  padding: .4rem .5rem;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  text-align: left;
+}
+
+.rowActive {
+  background: var(--accent-soft);
+}
+
+.rowText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.company {
+  font-size: .85rem;
+  font-weight: 620;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.role {
+  font-size: .78rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note {
+  padding: .55rem .5rem;
+  font-size: .82rem;
+  color: var(--muted);
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  margin-top: .25rem;
+  padding: .4rem .5rem .2rem;
+  border-top: 1px solid var(--line);
+  font-size: .75rem;
+  color: var(--muted);
+}
+
+.more {
+  padding: .15rem .45rem;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: .75rem;
+  color: var(--ink-2);
+}
