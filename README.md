@@ -136,8 +136,13 @@ Sign in with a key scoped `read,write` — never `admin`:
 go run ./cmd/applytrail apikey create --label browser-ui --scopes read,write
 ```
 
-`make run` still builds and serves the API alone. See
-[Web UI](https://vamsikrishna1211.github.io/applytrail/WEB-UI.html).
+`make run` still builds and serves the API alone.
+
+Deployments get it without asking: the production image builds the client in a
+stage of its own and compiles it in, so a Cloud Run service answers the UI and
+the API on one origin. See
+[Web UI](https://vamsikrishna1211.github.io/applytrail/WEB-UI.html) and
+[Deployment](https://vamsikrishna1211.github.io/applytrail/DEPLOY.html).
 
 ## Connect an agent
 

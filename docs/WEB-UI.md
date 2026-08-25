@@ -56,7 +56,15 @@ script and no third-party origin, which is what keeps that budget at zero. See
 [Security](SECURITY.md) for the wider trust model.
 
 If the server rejects a key, the client drops it and returns to the unlock
-screen rather than leaving a signed-in UI that fails every request.
+screen rather than leaving a signed-in UI that fails every request — and says
+why, quoting the error code, the message and the request id. Dropping the key
+silently was worse than not dropping it: the unlock appeared to work and then
+bounced, with nothing to read.
+
+The commonest cause of a refusal is not a bad key but the wrong database. A key
+exists only in the database it was created in, so one minted against local
+Postgres is refused by a deployment reading Neon, and the reverse. The unlock
+screen names this, because the key itself looks perfectly valid.
 
 ## What it shows
 
@@ -129,3 +137,23 @@ on a clone that has never run npm.
 `make build-all` and the production `Dockerfile` do both halves. API misses
 under `/v1`, `/mcp` and the health probes always answer in the JSON envelope,
 UI or not — a routing mistake should never come back as an HTML document.
+
+## In a deployment
+
+Nothing about the UI is deployment-specific. The production image builds the
+client in a `node` stage, copies the bundle to where the embed directive
+expects it, and compiles the server with `-tags webui`; the result is a single
+distroless binary that serves both surfaces on one origin. Opening the service
+URL is all there is to it — see [Deployment](DEPLOY.md).
+
+Two consequences worth stating:
+
+- **The UI is served unauthenticated, and that is correct.** It is a static
+  document with no data in it. The credential is supplied by whoever opens it
+  and spent on `/v1`, which authenticates as it always has. Cloud Run's
+  `--allow-unauthenticated` governs whether requests reach the container, not
+  whether they are trusted.
+- **The bundle's URL is the deployment's URL,** so the client always talks to
+  the server that served it. There is no API base to configure, no environment
+  substitution at boot, and no way for a stale build to point at a different
+  backend.

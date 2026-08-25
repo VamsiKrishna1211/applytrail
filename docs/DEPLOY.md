@@ -96,6 +96,11 @@ examples use `us-east5`, which is the closest Cloud Run region to Neon's
    `--platform linux/amd64` is required when building on Apple Silicon: Cloud
    Run does not run arm64 images, and the failure surfaces only at deploy time.
 
+   The image builds the [browser client](WEB-UI.md) in a stage of its own and
+   compiles it into the server binary with `-tags webui`, so the deployment
+   serves the UI and the API from one origin with no static host and no CORS.
+   Nothing needs to be enabled for this; there is no build argument to set.
+
 7. **Deploy**:
 
    ```bash
@@ -121,7 +126,20 @@ examples use `us-east5`, which is the closest Cloud Run region to Neon's
    Cloud Run injects `PORT`, which the server reads before falling back to
    `APPLYTRAIL_ADDR`.
 
-8. **Point your agent at it**:
+8. **Open the UI** at the service URL the deploy prints. It asks for a key,
+   which should be scoped `read,write` and never `admin` — the browser holds
+   it, and an admin key held in a browser can mint more:
+
+   ```bash
+   APPLYTRAIL_DATABASE_URL="..." \
+     go run ./cmd/applytrail apikey create -label browser-ui -scopes read,write
+   ```
+
+   Point it at the **same** database the service reads. A key exists only in
+   the database it was created in, so one minted against a local Postgres
+   authenticates against nothing on Cloud Run, and the UI will say so.
+
+9. **Point your agent at it**:
 
    ```bash
    claude mcp add --transport http applytrail https://<service-url>/mcp \
