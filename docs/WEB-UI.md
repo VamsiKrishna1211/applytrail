@@ -83,6 +83,25 @@ The board splits into **Active** (`queued` through `offer`) and **Closed**
 `screened_out` appear in neither: those are triage states, and a posting in
 them has no application to move.
 
+## Search
+
+The box in the top bar searches every application, on any page, across
+company, role, location, resume and cover-letter variant, notes and status.
+Terms match independently and as substrings, so `goog staff` finds a staff role
+at Google in either order. `/` focuses it from anywhere, arrow keys walk the
+results, Enter opens the highlighted one and Escape clears it.
+
+Choosing a result opens the detail drawer, which is where a status is changed
+by hand — so a company can be found and moved without knowing which board it
+was sitting on, or whether it was on one at all.
+
+It searches every status, not the current view, and it fetches nothing until
+two characters are typed. That one request covers the most recent 200
+applications and every keystroke after it is local: the list endpoint's only
+text parameter is an exact company match, so substring search has to happen in
+the browser. The footer says how many were searched and offers **search older**
+while pages remain, rather than implying a whole pipeline was covered.
+
 ## Transitions
 
 Selecting a card offers exactly the moves

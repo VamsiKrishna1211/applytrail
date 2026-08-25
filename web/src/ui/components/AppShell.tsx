@@ -2,6 +2,7 @@ import { NavLink, Outlet, useSearchParams } from 'react-router-dom'
 import { useCredential } from '@/app/ServicesProvider'
 import { cx } from '@/ui/cx'
 import { ApplicationDrawer } from './ApplicationDrawer'
+import { GlobalSearch } from './GlobalSearch'
 import styles from './AppShell.module.css'
 
 const NAV = [
@@ -40,6 +41,8 @@ export function AppShell({ wide = false }: { wide?: boolean }) {
             </NavLink>
           ))}
         </nav>
+
+        <GlobalSearch />
 
         <div className={styles.credential}>
           {/* The last four characters only. A credential that is fully legible
