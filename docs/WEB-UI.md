@@ -70,6 +70,7 @@ screen names this, because the key itself looks perfectly valid.
 
 | Page | Reads | Writes |
 |---|---|---|
+| Top-bar search | `GET /v1/applications` (every status) | — |
 | Dashboard | `GET /v1/stats`, `GET /v1/applications/followups` | — |
 | Pipeline | `GET /v1/applications?status=…` | `PATCH /v1/applications/{id}` |
 | Detail drawer | `GET /v1/applications/{id}` | `PATCH /v1/applications/{id}`, `POST /v1/applications/{id}/notes` |
