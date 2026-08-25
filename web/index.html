@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
     <title>ApplyTrail</title>
+    <!-- Ahead of the first paint, so a chosen theme does not flash the other
+         one. A file rather than inline script: the CSP forbids inline. -->
+    <script src="/theme.js"></script>
   </head>
   <body>
     <div id="root"></div>

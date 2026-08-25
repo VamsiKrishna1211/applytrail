@@ -96,12 +96,62 @@ Choosing a result opens the detail drawer, which is where a status is changed
 by hand — so a company can be found and moved without knowing which board it
 was sitting on, or whether it was on one at all.
 
+The Pipeline's own box, beside **Active/Closed**, is a different gesture on a
+smaller subject: it narrows the board in front of you rather than searching the
+pipeline, matching with the same rules over the cards already loaded. It says
+`12 of 40` while it is filtering, because a board of empty columns otherwise
+reads as a board with nothing on it, and Escape clears it. A card the filter
+hides takes the move bar with it and gets it back when the filter is cleared.
+
 It searches every status, not the current view, and it fetches nothing until
 two characters are typed. That one request covers the most recent 200
 applications and every keystroke after it is local: the list endpoint's only
 text parameter is an exact company match, so substring search has to happen in
 the browser. The footer says how many were searched and offers **search older**
 while pages remain, rather than implying a whole pipeline was covered.
+
+## Both pages scroll in place
+
+Neither page is a document. The window does not scroll; the parts do.
+
+On **Pipeline** the top bar, the page head and the move bar are fixed rows, and
+each status column scrolls its own cards with its heading pinned. A long
+`applied` column no longer drags every other column's heading off the screen,
+and the move bar is where it was when you selected the card. Columns hold a
+minimum width rather than dividing whatever is there, so five columns on a
+narrow window scroll sideways instead of squeezing to widths nothing can be
+read at.
+
+On the **Dashboard** the head and the four tiles are fixed, and the three
+panels below them each scroll inside their own bounds. That matters most for
+the funnel and the queue: the funnel is the control that filters the queue
+beside it, and reading to the bottom of a fifty-row queue used to take the
+control with it.
+
+The variant table takes only the height its rows need rather than a fixed
+share, so a handful of variants leaves the space to the lists above — but it is
+capped and scrolls beyond that, because `/v1/stats` returns one row per resume
+variant ever used and puts no limit on how many that is. Its column headings
+pin themselves while its rows move.
+
+Below 64rem both dashboard columns stack, and a frame stops helping: four
+scroll boxes sharing a phone's height is worse than a page that simply scrolls.
+At that width the Dashboard hands the scroll back to the page.
+
+## Light and dark
+
+The tokens follow `prefers-color-scheme`, and the control beside **sign out**
+overrides it: system, light, dark, then back to system. "Follow the system" is
+the default and needs no stored value, so nothing is written until a side is
+picked.
+
+The choice is held in `localStorage` — unlike the credential, which is
+deliberately in `sessionStorage` — because a theme is a preference rather than
+a secret, and one that died with the tab would be worth less than none. It is
+applied by `web/public/theme.js` in `<head>`, ahead of the first paint and long
+ahead of React, so a chosen theme does not flash the other one on every load.
+That is a file rather than an inline script because the CSP permits no inline
+script; being same-origin, it needs no exception.
 
 ## Transitions
 

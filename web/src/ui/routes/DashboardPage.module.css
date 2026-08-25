@@ -1,12 +1,23 @@
+/* The page is the frame's contents: a fixed head, fixed tiles, then panels
+ * that each scroll inside their own bounds. A flex column rather than grid
+ * rows because the error notice is conditional. */
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  gap: .9rem;
+}
+
 .head {
+  flex: 0 0 auto;
   display: flex;
   align-items: baseline;
   gap: .9rem;
-  margin-bottom: .25rem;
 }
 
 .title {
-  font-size: 1.75rem;
+  font-size: 1.25rem;
   font-weight: 680;
 }
 
@@ -16,30 +27,50 @@
   color: var(--muted);
 }
 
-.lede {
-  margin-bottom: 1.75rem;
-  font-size: .95rem;
-  color: var(--ink-2);
-}
-
-.section { margin-top: 2rem; }
+/* Neither shrinks. The notice carries an arbitrary-length list of API details
+ * and the tiles are the page's headline numbers; squeezing either to buy a
+ * lane a few pixels would be the wrong trade. */
+.notice { flex: 0 0 auto; }
+.tiles { flex: 0 0 auto; }
 
 .split {
+  flex: 1 1 auto;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr);
-  gap: 1.5rem;
-  align-items: start;
+  gap: 1rem;
 }
 
-@media (max-width: 64rem) {
-  .split { grid-template-columns: minmax(0, 1fr); }
+/* A panel that is a scroll region: its header stays, its body takes the rest.
+ * `overflow: hidden` keeps the scrolled content inside the border radius. */
+.lane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
-.queueHead {
+/* A plain block, not a flex column: Skeleton carries its height as an inline
+ * style with no flex-shrink guard, and a flex parent would squash the
+ * placeholders. The `scrolls` global supplies overflow and min-height. */
+.laneBody { flex: 1 1 auto; }
+
+/* The variant table takes only the height its rows need rather than a rigid
+ * share that would starve the two lists above it — but it is capped, because
+ * the endpoint returns one row per resume variant ever used and puts no limit
+ * on that. */
+.variants {
+  /* Never shrink: the cap is what protects the lists, and letting this shrink
+   * too meant three rows scrolling inside a panel with room for four. All the
+   * pressure goes to the split above, whose lanes scroll by design. */
+  flex: 0 0 auto;
+  max-height: 30%;
+}
+
+.queueAside {
   display: flex;
   align-items: baseline;
   gap: .7rem;
-  margin-bottom: .85rem;
 }
 
 .filterNote {
@@ -48,7 +79,6 @@
 }
 
 .clear {
-  margin-left: auto;
   background: none;
   border: 0;
   padding: 0;
@@ -60,4 +90,15 @@
   display: flex;
   flex-direction: column;
   gap: .5rem;
+}
+
+/* Narrow enough and the split is one column, so a fixed frame would stack four
+ * scroll boxes down a phone. Below that width the page simply scrolls again —
+ * `.mainFill` gives back the overflow at the same breakpoint. */
+@media (max-width: 64rem) {
+  .split { grid-template-columns: minmax(0, 1fr); }
+
+  .page { height: auto; }
+  .lane { overflow: visible; }
+  .variants { max-height: none; }
 }

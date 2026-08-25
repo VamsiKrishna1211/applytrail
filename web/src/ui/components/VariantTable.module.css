@@ -5,7 +5,14 @@
   align-items: center;
 }
 
+/* The grid scrolls inside its panel, so the six heading cells pin themselves.
+ * There is no <thead> to lean on — the header row is six ordinary grid
+ * children — and they need an opaque background or rows show through. */
 .head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
   font-size: .72rem;
   letter-spacing: .07em;
   text-transform: uppercase;

@@ -39,13 +39,13 @@ function Shell() {
 
   return (
     <Routes>
-      <Route element={<AppShell />}>
+      <Route element={<AppShell wide fill />}>
         <Route index element={<DashboardPage />} />
       </Route>
-      <Route element={<AppShell wide />}>
+      <Route element={<AppShell wide fill />}>
         <Route path="pipeline" element={<PipelinePage />} />
       </Route>
-      <Route path="*" element={<AppShell />}>
+      <Route path="*" element={<AppShell wide fill />}>
         <Route path="*" element={<DashboardPage />} />
       </Route>
     </Routes>

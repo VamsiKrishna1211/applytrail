@@ -3,6 +3,7 @@ import { useCredential } from '@/app/ServicesProvider'
 import { cx } from '@/ui/cx'
 import { ApplicationDrawer } from './ApplicationDrawer'
 import { GlobalSearch } from './GlobalSearch'
+import { ThemeToggle } from './ThemeToggle'
 import styles from './AppShell.module.css'
 
 const NAV = [
@@ -16,8 +17,12 @@ const NAV = [
  * Pipeline needs the full window for its columns while the dashboard reads
  * better in a measured column, so the shell takes the width as a prop rather
  * than each page fighting the container it was given.
+ *
+ * `fill` is the other half of that: a board is a frame whose parts scroll
+ * themselves, a dashboard is a document that scrolls as a whole. The two are
+ * independent — width is not the same question as height.
  */
-export function AppShell({ wide = false }: { wide?: boolean }) {
+export function AppShell({ wide = false, fill = false }: { wide?: boolean; fill?: boolean }) {
   const credential = useCredential()
 
   // The open application is a URL parameter, not component state: it survives
@@ -27,7 +32,7 @@ export function AppShell({ wide = false }: { wide?: boolean }) {
   const openId = searchParams.get('app') ?? undefined
 
   return (
-    <div className={styles.shell}>
+    <div className={cx(styles.shell, fill && styles.shellFill)}>
       <header className={styles.topbar}>
         <NavLink to="/" className={cx(styles.brand)}>
           <span className={styles.mark} aria-hidden="true" />
@@ -45,6 +50,8 @@ export function AppShell({ wide = false }: { wide?: boolean }) {
         <GlobalSearch />
 
         <div className={styles.credential}>
+          <ThemeToggle />
+
           {/* The last four characters only. A credential that is fully legible
               on screen is one a screen share leaks. */}
           <span className={styles.token} title="the key this session is using">
@@ -56,7 +63,7 @@ export function AppShell({ wide = false }: { wide?: boolean }) {
         </div>
       </header>
 
-      <main className={cx(styles.main, wide && styles.wide)}>
+      <main className={cx(styles.main, wide && styles.wide, fill && styles.mainFill)}>
         <Outlet />
       </main>
 

@@ -72,12 +72,24 @@
   background: var(--code-bg);
 }
 
+/* A real button rather than a text link: it ends the session, and the only
+ * other thing that looked like it in this corner was the key it revokes.
+ * Quiet until pointed at, where it takes the stop tone every other
+ * irreversible control in the app uses. */
 .signout {
-  background: none;
-  border: 0;
-  padding: 0;
-  color: var(--accent);
+  padding: .3rem .7rem;
+  border: 1px solid var(--line-2);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink-2);
   font-size: .82rem;
+  font-weight: 600;
+}
+
+.signout:hover {
+  color: var(--stop);
+  background: var(--stop-soft);
+  border-color: var(--stop-line);
 }
 
 .main {
@@ -88,4 +100,43 @@
 
 .wide {
   max-width: none;
+}
+
+/* The app frame.
+ *
+ * Pipeline is a board, not a document: its columns scroll in place and the
+ * page behind them does not move. `fill` turns the shell into a viewport-tall
+ * grid of two rows — the topbar and everything else — and clips on `.main`
+ * rather than here, because GlobalSearch's dropdown hangs out of the topbar
+ * row and an `overflow` on the shell would cut it off.
+ */
+.shellFill {
+  height: 100dvh;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: var(--topbar-h) minmax(0, 1fr);
+}
+
+/* `.main`'s `margin: 0 auto` centres a *flow* block; on a grid item the same
+ * auto margins size it to its content and centre that instead, which left the
+ * board narrower than the window. Fill the track explicitly. */
+.mainFill {
+  width: 100%;
+  margin: 0 auto;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding: 1.25rem var(--gutter);
+}
+
+@media (max-width: 40rem) {
+  .mainFill { padding: 1rem; }
+}
+
+/* Narrow enough and a frame stops helping: the dashboard's regions stack into
+ * one column, and four scroll boxes sharing a phone's height is worse than a
+ * page that simply scrolls. Pipeline is unaffected — its page is `height: 100%`
+ * of a main that still has a definite height, so nothing ever overflows. */
+@media (max-width: 64rem) {
+  .mainFill { overflow-y: auto; }
 }
