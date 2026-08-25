@@ -45,8 +45,20 @@ export const TERMINAL_STATUSES: readonly Status[] = ['accepted', 'rejected', 'wi
 /** Statuses where the tenant has actually applied. Follow-up SLAs act on these. */
 export const ENGAGED_STATUSES: readonly Status[] = ['applied', 'screening', 'interview', 'offer']
 
-/** The columns of the board, split the way a person thinks about their pipeline. */
+/**
+ * The columns of the board, split the way a person thinks about their pipeline.
+ *
+ * Between them the two views name every status in `STATUSES`. A status in
+ * neither is a status whose cards exist and cannot be reached: `discovered` in
+ * particular is where `record_discoveries` puts everything an agent finds, so
+ * leaving it off the board hid the whole intake.
+ *
+ * `screened_out` sits with Closed rather than Active because it is a decision
+ * not to pursue. It is not terminal — `screened_out` can still go to `queued`
+ * or `applied` — so it is reachable from where it lives, not stranded there.
+ */
 export const ACTIVE_BOARD_STATUSES: readonly Status[] = [
+  'discovered',
   'queued',
   'applied',
   'screening',
@@ -54,6 +66,7 @@ export const ACTIVE_BOARD_STATUSES: readonly Status[] = [
   'offer',
 ]
 export const CLOSED_BOARD_STATUSES: readonly Status[] = [
+  'screened_out',
   'accepted',
   'rejected',
   'ghosted',

@@ -1,9 +1,10 @@
 /* The board fills the frame it is given and scrolls sideways rather than
- * squeezing: five columns at a third of a laptop's width are five columns
- * nobody can read. */
+ * squeezing: six columns at a sixth of a laptop's width are six columns nobody
+ * can read. The minimum is what six of them need to fit a 1280px main without
+ * scrolling; below that the board scrolls and the cards stay legible. */
 .board {
   display: grid;
-  grid-template-columns: repeat(var(--columns, 5), minmax(208px, 1fr));
+  grid-template-columns: repeat(var(--columns, 6), minmax(190px, 1fr));
   gap: 1rem;
   height: 100%;
   min-height: 0;
@@ -135,5 +136,5 @@
 }
 
 @media (max-width: 40rem) {
-  .board { grid-template-columns: repeat(var(--columns, 5), minmax(248px, 1fr)); }
+  .board { grid-template-columns: repeat(var(--columns, 6), minmax(248px, 1fr)); }
 }

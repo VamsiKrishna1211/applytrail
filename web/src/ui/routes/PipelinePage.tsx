@@ -26,6 +26,10 @@ const VIEWS: Record<View, { label: string; statuses: readonly Status[] }> = {
 /** One page of cards. Large enough that most boards arrive whole, bounded so none arrives forever. */
 const PAGE_SIZE = 100
 
+/** The intake column, which is paged separately — see the comment in the component. */
+const INTAKE: Status = 'discovered'
+const INTAKE_QUERY = { status: [INTAKE], limit: PAGE_SIZE }
+
 export function PipelinePage() {
   const { clock } = useServices()
   const [, setSearchParams] = useSearchParams()
@@ -34,17 +38,43 @@ export function PipelinePage() {
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
 
   const statuses = VIEWS[view].statuses
-  const query = useMemo(() => ({ status: statuses, limit: PAGE_SIZE }), [statuses])
+
+  // `discovered` is fetched on its own rather than with the rest of the view.
+  // The API pages one list ordered by creation, newest first, and a run of
+  // record_discoveries writes a burst of new rows — so a shared page of 100
+  // would be all intake and none of the columns you were actually working in.
+  // Two queries mean a busy intake cannot starve the board beside it.
+  const boardStatuses = useMemo(
+    () => statuses.filter((status) => status !== INTAKE),
+    [statuses],
+  )
+  const intakeShown = statuses.includes(INTAKE)
+
+  const query = useMemo(() => ({ status: boardStatuses, limit: PAGE_SIZE }), [boardStatuses])
   const list = useApplications(query)
+  const intake = useApplications(INTAKE_QUERY, intakeShown)
   const updateStatus = useUpdateStatus()
 
   // The same matcher the top-bar search uses, over the cards already on the
   // board: this narrows what is in front of you, where that one finds an
   // application in any status anywhere in the pipeline.
   const shown = useMemo(
-    () => searchApplications(list.applications, filter),
-    [list.applications, filter],
+    () => searchApplications([...list.applications, ...intake.applications], filter),
+    [list.applications, intake.applications, filter],
   )
+
+  // Two lists, one board: either can still have pages left, and the head says
+  // so once for both rather than growing a second control.
+  const loaded = list.applications.length + intake.applications.length
+  const hasMore = list.hasNextPage || (intakeShown && intake.hasNextPage)
+  const fetchingMore = list.isFetchingNextPage || intake.isFetchingNextPage
+  const pending = list.isPending || (intakeShown && intake.isPending)
+  const error = list.error ?? (intakeShown ? intake.error : null)
+
+  function loadMore() {
+    if (list.hasNextPage) void list.fetchNextPage()
+    if (intakeShown && intake.hasNextPage) void intake.fetchNextPage()
+  }
 
   const columns = useMemo(() => buildBoard(shown, statuses), [shown, statuses])
 
@@ -125,32 +155,32 @@ export function PipelinePage() {
             zero otherwise looks like a board with nothing on it. */}
         {filter ? (
           <span className={styles.filterCount}>
-            {shown.length} of {list.applications.length}
+            {shown.length} of {loaded}
           </span>
         ) : null}
 
         {/* Paging belongs beside the count, not under a board that now ends
             with the window. */}
-        {list.hasNextPage ? (
+        {hasMore ? (
           <div className={styles.more}>
             <span className={styles.moreNote}>
-              Showing {list.applications.length}; the board is not complete until this is empty.
+              Showing {loaded}; the board is not complete until this is empty.
             </span>
             <button
               type="button"
               className={styles.moreButton}
-              disabled={list.isFetchingNextPage}
-              onClick={() => void list.fetchNextPage()}
+              disabled={fetchingMore}
+              onClick={loadMore}
             >
-              {list.isFetchingNextPage ? 'Loading…' : 'Load more'}
+              {fetchingMore ? 'Loading…' : 'Load more'}
             </button>
           </div>
         ) : null}
       </div>
 
-      {list.isError ? <ErrorNotice error={list.error} what="load the board" /> : null}
+      {error ? <ErrorNotice error={error} what="load the board" /> : null}
 
-      {list.isPending ? (
+      {pending ? (
         <div className={styles.loading} style={{ '--columns': statuses.length } as CSSProperties}>
           {statuses.map((status) => (
             <Skeleton key={status} height={220} />

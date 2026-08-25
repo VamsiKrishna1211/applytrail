@@ -79,10 +79,17 @@ The funnel reports every status, empty ones included, because that is what the
 endpoint returns and a chart that changes shape as data arrives is harder to
 read than one that does not.
 
-The board splits into **Active** (`queued` through `offer`) and **Closed**
-(`accepted`, `rejected`, `ghosted`, `withdrawn`). `discovered` and
-`screened_out` appear in neither: those are triage states, and a posting in
-them has no application to move.
+The board splits into **Active** (`discovered` through `offer`) and **Closed**
+(`screened_out`, `accepted`, `rejected`, `ghosted`, `withdrawn`). Between them
+they name every status, because a status on neither board is a status whose
+cards cannot be reached at all: `record_discoveries` writes a real application
+row at `discovered`, and leaving that column off hid the entire intake.
+
+`discovered` is fetched by a query of its own rather than with the rest of the
+Active view. The list endpoint pages one result set ordered by creation, newest
+first, and a search run writes a burst of new rows — so a shared page of 100
+would have been all intake and none of the columns you were working in. The two
+lists share one **Load more**, which advances whichever still has pages.
 
 ## Search
 
@@ -118,9 +125,9 @@ On **Pipeline** the top bar, the page head and the move bar are fixed rows, and
 each status column scrolls its own cards with its heading pinned. A long
 `applied` column no longer drags every other column's heading off the screen,
 and the move bar is where it was when you selected the card. Columns hold a
-minimum width rather than dividing whatever is there, so five columns on a
+minimum width rather than dividing whatever is there, so six columns on a
 narrow window scroll sideways instead of squeezing to widths nothing can be
-read at.
+read at. The minimum is what six of them need to fit a 1280px main.
 
 On the **Dashboard** the head and the four tiles are fixed, and the three
 panels below them each scroll inside their own bounds. That matters most for
