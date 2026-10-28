@@ -1,0 +1,33 @@
+app = "applytrail"
+primary_region = "iad"
+kill_signal = "SIGTERM"
+kill_timeout = "25s"
+
+[build]
+  dockerfile = "deploy/Dockerfile"
+
+[env]
+  APPLYTRAIL_ENV = "production"
+  APPLYTRAIL_DB_MAX_CONNS = "4"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 20
+    hard_limit = 25
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/readyz"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
