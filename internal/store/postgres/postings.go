@@ -29,6 +29,7 @@ func (s postingStore) FindByCanonicalURLs(ctx context.Context, tenantID domain.I
 	for i, row := range rows {
 		refs[i] = domain.PostingRef{
 			PostingID:         row.ID,
+			CompanyID:         row.CompanyID,
 			CanonicalURL:      row.CanonicalUrl,
 			Source:            domain.Source(row.Source),
 			ExternalID:        row.ExternalID,
@@ -63,6 +64,7 @@ func (s postingStore) FindByExternalIDs(ctx context.Context, tenantID domain.ID,
 	for i, row := range rows {
 		refs[i] = domain.PostingRef{
 			PostingID:         row.ID,
+			CompanyID:         row.CompanyID,
 			CanonicalURL:      row.CanonicalUrl,
 			Source:            domain.Source(row.Source),
 			ExternalID:        row.ExternalID,
@@ -92,6 +94,7 @@ func (s postingStore) FindByFingerprints(ctx context.Context, tenantID domain.ID
 	for i, row := range rows {
 		refs[i] = domain.PostingRef{
 			PostingID:         row.ID,
+			CompanyID:         row.CompanyID,
 			CanonicalURL:      row.CanonicalUrl,
 			Source:            domain.Source(row.Source),
 			ExternalID:        row.ExternalID,
@@ -106,12 +109,13 @@ func (s postingStore) FindByFingerprints(ctx context.Context, tenantID domain.ID
 	return refs, nil
 }
 
-func (s postingStore) FindByDescriptionHashes(ctx context.Context, tenantID domain.ID, hashes []string) ([]domain.PostingRef, error) {
-	if len(hashes) == 0 {
+func (s postingStore) FindByDescriptionHashes(ctx context.Context, tenantID domain.ID, companyIDs []domain.ID, hashes []string) ([]domain.PostingRef, error) {
+	if len(hashes) == 0 || len(companyIDs) == 0 {
 		return nil, nil
 	}
 	rows, err := s.q.FindPostingsByDescriptionHashes(ctx, sqlcgen.FindPostingsByDescriptionHashesParams{
 		TenantID:          tenantID,
+		CompanyIds:        companyIDs,
 		DescriptionHashes: hashes,
 	})
 	if err != nil {
@@ -121,6 +125,7 @@ func (s postingStore) FindByDescriptionHashes(ctx context.Context, tenantID doma
 	for i, row := range rows {
 		refs[i] = domain.PostingRef{
 			PostingID:         row.ID,
+			CompanyID:         row.CompanyID,
 			CanonicalURL:      row.CanonicalUrl,
 			Source:            domain.Source(row.Source),
 			ExternalID:        row.ExternalID,
@@ -152,6 +157,7 @@ func (s postingStore) FindFuzzyCandidates(ctx context.Context, tenantID, company
 	for i, row := range rows {
 		refs[i] = domain.PostingRef{
 			PostingID:         row.ID,
+			CompanyID:         companyID,
 			CanonicalURL:      row.CanonicalUrl,
 			NormalizedTitle:   row.NormalizedTitle,
 			LocationBucket:    row.LocationBucket,

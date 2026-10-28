@@ -275,40 +275,99 @@ var countryAliases = map[string]string{
 	"uae": "united arab emirates", "nl": "netherlands", "de": "germany",
 }
 
-// BucketLocation reduces a free-text location to a comparable bucket:
-// "remote", a city name, or a country.
+// placeholderLocations are strings a board sends when it has no real location
+// to report. They are not information, so they normalize to "", the same as
+// an outright empty field: "unknown" is not a place, and treating it as one
+// makes it a false disambiguator between two sightings of the same job.
+var placeholderLocations = map[string]bool{
+	"not specified": true, "not stated": true, "unspecified": true,
+	"n a": true, "na": true, "tbd": true, "various": true, "multiple": true,
+	"various locations": true, "multiple locations": true, "location not specified": true,
+}
+
+// BucketLocation reduces a free-text location to its primary comparable
+// bucket: "remote", a city name, or a country. This is the value stored on a
+// posting row.
 //
 // Hybrid roles bucket by city rather than as remote, because a hybrid job in
 // Berlin and a hybrid job in Austin are not interchangeable.
 func BucketLocation(location string) string {
+	buckets := BucketLocationCandidates(location)
+	if len(buckets) == 0 {
+		return ""
+	}
+	return buckets[0]
+}
+
+// BucketLocationCandidates reduces a free-text location to every plausible
+// bucket it could refer to, in priority order. A single-site location yields
+// one bucket, same as BucketLocation; a multi-site string like
+// "Manhattan/SF/Philadelphia" yields one per site, so a later single-site
+// sighting of any of them can still be recognised as the same job.
+//
+// Placeholders ("Not specified") and pure noise yield no candidates at all,
+// which the caller treats as "unknown" rather than as a distinguishing value.
+func BucketLocationCandidates(location string) []string {
 	lower := strings.ToLower(strings.TrimSpace(location))
 	if lower == "" {
-		return ""
+		return nil
+	}
+	// Parenthetical asides ("relocation required", "m/w/d") are not part of
+	// the place, the same reasoning NormalizeTitle applies to titles.
+	lower = parenthetical.ReplaceAllString(lower, " ")
+	lower = strings.TrimSpace(multiSpace.ReplaceAllString(lower, " "))
+	if lower == "" || placeholderLocations[cleanupPunct(lower)] {
+		return nil
 	}
 
 	isHybrid := strings.Contains(lower, "hybrid")
+	var out []string
 	if !isHybrid {
 		for _, hint := range remoteHints {
 			if strings.Contains(lower, hint) {
-				return "remote"
+				out = append(out, "remote")
+				break
 			}
 		}
 	}
 
-	// "Austin, TX, United States" identifies itself by its first component.
-	primary := lower
-	if idx := strings.IndexAny(lower, ",|/"); idx > 0 {
-		primary = lower[:idx]
+	// Slash and pipe separate independent sites ("Manhattan/SF/Philadelphia"):
+	// each is its own candidate. Comma separates a hierarchy within ONE site
+	// ("Austin, TX, United States"): only the first component identifies the
+	// place, so it is not split further.
+	for _, site := range strings.FieldsFunc(lower, func(r rune) bool { return r == '|' || r == '/' }) {
+		primary := site
+		if idx := strings.IndexByte(primary, ','); idx > 0 {
+			primary = primary[:idx]
+		}
+		primary = cleanupPunct(primary)
+		primary = strings.TrimSpace(strings.TrimSuffix(primary, " hybrid"))
+		primary = strings.TrimSpace(strings.TrimPrefix(primary, "hybrid "))
+		if primary == "" || placeholderLocations[primary] {
+			continue
+		}
+		if canonical, ok := countryAliases[primary]; ok {
+			primary = canonical
+		}
+		if !contains(out, primary) {
+			out = append(out, primary)
+		}
 	}
-	primary = nonAlphanumeric.ReplaceAllString(primary, " ")
-	primary = strings.TrimSpace(multiSpace.ReplaceAllString(primary, " "))
-	primary = strings.TrimSpace(strings.TrimSuffix(primary, " hybrid"))
-	primary = strings.TrimSpace(strings.TrimPrefix(primary, "hybrid "))
+	return out
+}
 
-	if canonical, ok := countryAliases[primary]; ok {
-		return canonical
+func cleanupPunct(s string) string {
+	s = nonAlphanumeric.ReplaceAllString(s, " ")
+	return strings.TrimSpace(multiSpace.ReplaceAllString(s, " "))
+}
+
+func contains(list []string, v string) bool {
+	for _, item := range list {
+		if item == v {
+			return true
+		}
 	}
-	return primary
+	return false
 }
 
 // Fingerprint is the tier 3 key: the same role, at the same company, in the

@@ -309,8 +309,55 @@ func TestScopesAreEnforcedOverMCP(t *testing.T) {
 	// agent needs no write access to do its job.
 	callTool[map[string]any](t, session, "filter_new_postings", map[string]any{"candidates": candidates})
 
+	// The message is deliberately generic — it must not repeat the key's
+	// label or its scope list back to whoever is holding it (see
+	// domain.PermissionError) — so this asserts on what a caller can act on
+	// rather than on exact wording.
 	message := callToolExpectingError(t, session, "record_discoveries", map[string]any{"postings": candidates})
-	assert.Contains(t, message, "permission denied")
+	assert.Contains(t, message, "write")
+	assert.NotContains(t, message, "routine", "the credential's label (newMCPSession names it \"routine\") must not leak into a client-facing error")
+}
+
+// A malformed timestamp must be a tool error, not silently treated as absent:
+// record_application(applied_at: "yesterday") used to record "now" instead of
+// rejecting the input, and REST already 400s on the equivalent case.
+func TestMalformedTimestampIsRejectedNotIgnored(t *testing.T) {
+	session := newMCPSession(t)
+
+	message := callToolExpectingError(t, session, "record_application", map[string]any{
+		"posting":    posting("4012345", "Senior Software Engineer II"),
+		"applied_at": "yesterday",
+	})
+	assert.Contains(t, message, "applied_at")
+
+	message = callToolExpectingError(t, session, "list_applications", map[string]any{
+		"since": "last week",
+	})
+	assert.Contains(t, message, "since")
+}
+
+// update_application_status must be able to both set and clear a follow-up
+// date in one call — clear_next_action was missing from the tool schema
+// entirely, so an MCP caller had no way to unset one short of reaching a
+// terminal status.
+func TestUpdateApplicationStatus_ClearNextAction(t *testing.T) {
+	session := newMCPSession(t)
+
+	type applicationOut struct {
+		ID           string `json:"id"`
+		NextActionAt string `json:"next_action_at"`
+	}
+	applied := callTool[applicationOut](t, session, "record_application", map[string]any{
+		"posting": posting("4012345", "Senior Software Engineer II"),
+	})
+	require.NotEmpty(t, applied.NextActionAt, "applying schedules a follow-up")
+
+	cleared := callTool[applicationOut](t, session, "update_application_status", map[string]any{
+		"application_id":    applied.ID,
+		"status":            "interview",
+		"clear_next_action": true,
+	})
+	assert.Empty(t, cleared.NextActionAt)
 }
 
 func TestUnauthenticatedConnectionIsRejected(t *testing.T) {

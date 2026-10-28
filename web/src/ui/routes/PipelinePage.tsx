@@ -32,7 +32,7 @@ const INTAKE_QUERY = { status: [INTAKE], limit: PAGE_SIZE }
 
 export function PipelinePage() {
   const { clock } = useServices()
-  const [, setSearchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [view, setView] = useState<View>('active')
   const [filter, setFilter] = useState('')
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
@@ -205,7 +205,16 @@ export function PipelinePage() {
             setSelectedId(undefined)
             updateStatus.reset()
           }}
-          onOpen={() => selectedId && setSearchParams({ app: selectedId })}
+          onOpen={() => {
+            // Cloned, like GlobalSearch and AppShell's own close handler:
+            // passing a bare object replaces the whole query string, silently
+            // dropping any other param (there are none here today, but the
+            // three call sites disagreeing about this is the actual bug).
+            if (!selectedId) return
+            const next = new URLSearchParams(searchParams)
+            next.set('app', selectedId)
+            setSearchParams(next)
+          }}
         />
       </div>
     </div>

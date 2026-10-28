@@ -44,6 +44,7 @@ type ApplicationContact struct {
 	ApplicationID uuid.UUID
 	ContactID     uuid.UUID
 	CreatedAt     time.Time
+	TenantID      uuid.UUID
 }
 
 // Append-only timeline. Never updated or deleted: this is what lets a caller reason about how long a stage has been running.
@@ -138,18 +139,19 @@ type SearchProfile struct {
 
 // Audit of each execution: answers "did the routine run today, and did it find anything?"
 type SearchRun struct {
-	ID               uuid.UUID
-	TenantID         uuid.UUID
-	ProfileID        *uuid.UUID
-	Source           string
-	Query            string
-	CandidatesSeen   int32
-	NewCount         int32
-	DuplicateCount   int32
-	NeedsReviewCount int32
-	StartedAt        time.Time
-	FinishedAt       *time.Time
-	Notes            string
+	ID                 uuid.UUID
+	TenantID           uuid.UUID
+	ProfileID          *uuid.UUID
+	Source             string
+	Query              string
+	CandidatesSeen     int32
+	NewCount           int32
+	DuplicateCount     int32
+	NeedsReviewCount   int32
+	StartedAt          time.Time
+	FinishedAt         *time.Time
+	Notes              string
+	EligibleAgainCount int32
 }
 
 // Owner of every other row. Single-user deployments hold exactly one tenant; the column exists everywhere so multi-user is a deployment change, not a migration.

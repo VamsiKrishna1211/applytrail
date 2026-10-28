@@ -31,8 +31,15 @@ export function Board({
           </div>
 
           {/* Each column scrolls its own cards. A long `applied` column no
-              longer drags every other column's heading off the screen. */}
-          <div className={cx(styles.columnBody, 'scrolls')}>
+              longer drags every other column's heading off the screen.
+              tabIndex makes it reachable by keyboard: a plain overflow div
+              with no focusable content is invisible to Tab, so a
+              keyboard-only user could not scroll it at all (WCAG 2.1.1). */}
+          <div
+            className={cx(styles.columnBody, 'scrolls')}
+            tabIndex={0}
+            aria-label={`${statusLabel(column.status)} cards`}
+          >
             {column.applications.map((application) => (
               <button
                 key={application.id}

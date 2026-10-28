@@ -10,6 +10,7 @@ import "time"
 // policy needs it, and fetching it here avoids a second round trip per match.
 type PostingRef struct {
 	PostingID    ID
+	CompanyID    ID
 	CanonicalURL string
 
 	Source          Source

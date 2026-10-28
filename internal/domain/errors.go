@@ -19,6 +19,10 @@ var (
 	ErrUnauthenticated  = errors.New("unauthenticated")
 	ErrPermissionDenied = errors.New("permission denied")
 	ErrRateLimited      = errors.New("rate limited")
+	// ErrUnavailable means a dependency the request needs did not answer —
+	// the identity provider during authentication, say. The request may
+	// succeed unchanged if retried; the caller's input is not at fault.
+	ErrUnavailable = errors.New("unavailable")
 )
 
 // ValidationError collects field-level problems so a caller learns everything
@@ -68,6 +72,34 @@ func (e *ValidationError) Error() string {
 
 // Unwrap ties ValidationError to the ErrInvalidArgument sentinel.
 func (e *ValidationError) Unwrap() error { return ErrInvalidArgument }
+
+// PermissionError reports that a principal's scopes did not cover what it
+// tried to do.
+//
+// Error() is deliberately generic: every 4xx error's message is returned to
+// the caller verbatim (REST) or into the model's context (MCP), and this one
+// used to embed the key's label and its full scope list — handing a 403 body
+// back to whoever made the request. The detail is still available on the
+// struct for anything that wants to log it structurally, just not in the
+// string that reaches the caller.
+type PermissionError struct {
+	KeyLabel      string
+	HeldScopes    []Scope
+	RequiredScope Scope
+}
+
+// NewPermissionError returns an error reporting that a key with heldScopes
+// tried to use requiredScope.
+func NewPermissionError(keyLabel string, heldScopes []Scope, requiredScope Scope) error {
+	return &PermissionError{KeyLabel: keyLabel, HeldScopes: heldScopes, RequiredScope: requiredScope}
+}
+
+func (e *PermissionError) Error() string {
+	return fmt.Sprintf("this credential does not hold the %q scope", e.RequiredScope)
+}
+
+// Unwrap ties PermissionError to the ErrPermissionDenied sentinel.
+func (e *PermissionError) Unwrap() error { return ErrPermissionDenied }
 
 // NotFoundError names the entity that was missing.
 type NotFoundError struct {

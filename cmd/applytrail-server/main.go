@@ -13,7 +13,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/VamsiKrishna1211/applytrail/internal/auth/apikey"
 	"github.com/VamsiKrishna1211/applytrail/internal/config"
 	"github.com/VamsiKrishna1211/applytrail/internal/dedupe"
 	"github.com/VamsiKrishna1211/applytrail/internal/observability"
@@ -93,11 +92,18 @@ func run() error {
 		},
 	})
 
+	authn, err := authentication(cfg.Clerk, st.APIKeys())
+	if err != nil {
+		return err
+	}
+
 	router := httpapi.NewRouter(httpapi.Deps{
-		Version:       version,
-		DB:            pool,
-		Service:       svc,
-		Authenticator: apikey.New(st.APIKeys()),
+		Version:             version,
+		DB:                  pool,
+		Service:             svc,
+		Authenticator:       authn.Authenticator,
+		ProtectedResource:   authn.ProtectedResource,
+		ClerkPublishableKey: authn.ClerkPublishableKey,
 		Limiter: ratelimit.NewMemory(ratelimit.Config{
 			RequestsPerMinute: cfg.RateLimit.RequestsPerMinute,
 			Burst:             cfg.RateLimit.Burst,
@@ -109,7 +115,7 @@ func run() error {
 		MCPHandler: mcpserver.New(svc, version).Handler(),
 		// Nil unless the binary was built with `-tags webui`, in which case
 		// every unmatched path stays a JSON 404.
-		WebUI: webui.Handler(),
+		WebUI: webui.Handler(webui.Options{ClerkFrontendAPI: authn.ClerkFrontendAPI}),
 	})
 	slog.Info("web ui", "embedded", webui.Available())
 
@@ -120,7 +126,15 @@ func run() error {
 		ReadTimeout:       cfg.ReadTimeout,
 		WriteTimeout:      cfg.WriteTimeout,
 		IdleTimeout:       cfg.IdleTimeout,
-		BaseContext:       func(net.Listener) context.Context { return ctx },
+		// Rooted in Background, not ctx: ctx is cancelled by the signal that
+		// starts shutdown, and every in-flight request's context derives from
+		// whatever BaseContext returns. Using ctx here cancelled every request
+		// already in flight the instant SIGTERM arrived — before
+		// server.Shutdown even got a chance to drain them — so the drain
+		// window below waited on handlers whose database calls were already
+		// failing with context canceled. A signal cannot be un-delivered, so
+		// the only fix is for requests not to observe it in the first place.
+		BaseContext: func(net.Listener) context.Context { return context.Background() },
 	}
 
 	serverErr := make(chan error, 1)

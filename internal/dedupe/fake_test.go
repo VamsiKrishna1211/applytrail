@@ -57,6 +57,7 @@ func (f *fakeStore) seed(t *testing.T, companyName string, c domain.Candidate, s
 		companyID: company.ID,
 		ref: domain.PostingRef{
 			PostingID:         postingID,
+			CompanyID:         company.ID,
 			CanonicalURL:      n.CanonicalURL,
 			Source:            n.Source(),
 			ExternalID:        n.ExternalID(),
@@ -98,9 +99,17 @@ func (f *fakeStore) FindByFingerprints(_ context.Context, tenantID domain.ID, fi
 	}), nil
 }
 
-func (f *fakeStore) FindByDescriptionHashes(_ context.Context, tenantID domain.ID, hashes []string) ([]domain.PostingRef, error) {
+func (f *fakeStore) FindByDescriptionHashes(_ context.Context, tenantID domain.ID, companyIDs []domain.ID, hashes []string) ([]domain.PostingRef, error) {
+	wantedCompany := func(id domain.ID) bool {
+		for _, c := range companyIDs {
+			if c == id {
+				return true
+			}
+		}
+		return false
+	}
 	return f.filter(tenantID, func(p fakePosting) bool {
-		return p.ref.DescriptionHash != "" && contains(hashes, p.ref.DescriptionHash)
+		return p.ref.DescriptionHash != "" && contains(hashes, p.ref.DescriptionHash) && wantedCompany(p.companyID)
 	}), nil
 }
 

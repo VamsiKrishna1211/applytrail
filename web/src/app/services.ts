@@ -2,6 +2,7 @@ import type { Clock } from '@/core/ports/clock'
 import type { ApplicationsReader, ApplicationsWriter } from '@/core/ports/applications'
 import type { AuthEvents } from '@/core/ports/authEvents'
 import type { CredentialStore } from '@/core/ports/credentials'
+import type { IdentityProvider } from '@/core/ports/identity'
 import type { StatsReader } from '@/core/ports/stats'
 import { InMemoryAuthEvents } from '@/infra/InMemoryAuthEvents'
 import { SystemClock } from '@/infra/SystemClock'
@@ -28,6 +29,8 @@ export interface ServiceOptions {
   /** API root. Empty means same-origin, which is what the embedded build serves. */
   baseUrl?: string
   credentials?: CredentialStore
+  /** A sign-in session, when the server offers one. An API key, if held, still wins. */
+  identity?: IdentityProvider
   authEvents?: AuthEvents
   clock?: Clock
   fetch?: typeof globalThis.fetch
@@ -42,22 +45,29 @@ export interface ServiceOptions {
  */
 export function createServices(options: ServiceOptions = {}): Services {
   const credentials = options.credentials ?? new SessionCredentialStore()
+  const identity = options.identity
   const authEvents = options.authEvents ?? new InMemoryAuthEvents()
 
   const transport = new FetchTransport({
     baseUrl: options.baseUrl ?? import.meta.env.VITE_API_BASE_URL ?? '',
-    token: () => credentials.read(),
+    // A pasted key wins over a sign-in: someone who typed one in meant to use
+    // it, and it is the one the shell shows as in use.
+    token: () => credentials.read() ?? identity?.token(),
     // A credential the server rejects is worse than none: it leaves the shell
     // showing a signed-in UI that fails every request. Drop it — but record why
     // first, so the unlock screen can explain itself instead of just
-    // reappearing.
+    // reappearing. Whichever credential the token above chose is the one
+    // dropped.
     onAuthFailure: (error) => {
+      const usedKey = credentials.read() !== undefined
       authEvents.reject({
+        credential: usedKey ? 'api_key' : 'sign_in',
         code: error.code,
         message: error.message,
         requestId: error.requestId,
       })
-      credentials.clear()
+      if (usedKey) credentials.clear()
+      else void identity?.signOut()
     },
     ...(options.fetch ? { fetch: options.fetch } : {}),
   })

@@ -18,7 +18,7 @@ import (
 func TestEmbeddedBundleServes(t *testing.T) {
 	require.True(t, Available(), "no bundle embedded; run `make web` before building with -tags webui")
 
-	handler := Handler()
+	handler := Handler(Options{})
 	require.NotNil(t, handler)
 
 	recorder := httptest.NewRecorder()

@@ -27,7 +27,7 @@ For a hot-reloading loop, run the two apart:
 
 ```bash
 make run       # the API on :8080
-make web-dev   # the client on :5173, proxying /v1 to :8080
+make web-dev   # the client on :5173, proxying /v1 and /auth to :8080
 ```
 
 Vite proxies the API in development, so the browser still sees one origin and
@@ -35,9 +35,23 @@ the server still needs no CORS.
 
 ## Signing in
 
-There is no browser login. The API authenticates with API keys, so the UI asks
-for one and sends it as `Authorization: Bearer …` exactly as any other client
-would.
+On a server with Clerk sign-in configured (see
+[CONFIGURATION.md](CONFIGURATION.md#clerk)), the gate is Clerk's sign-in form.
+The browser never holds a long-lived secret: Clerk keeps the session, and the
+client asks it for a fresh token, valid for a minute, before each request. The
+server checks the token's signature locally against Clerk's published keys,
+refuses one minted for a page on any other origin, and maps the account to its
+tenant through `APPLYTRAIL_CLERK_TENANTS`. A signed-in person gets `read` and
+`write`, never `admin`.
+
+The client learns whether to offer it from `GET /auth/config` before it first
+renders, so one image serves any deployment. A server without Clerk, or one too
+old to answer, gets the API key form.
+
+Every server also accepts an API key, behind **Use an API key instead** when
+Clerk is on and as the only option when it is off. The UI sends it as
+`Authorization: Bearer …` exactly as any other client would. A pasted key wins
+over a Clerk session while it is held.
 
 **Issue it `read` and `write`, never `admin`:**
 
@@ -52,14 +66,19 @@ key it is holding. An admin key could mint more credentials from there; a
 read+write key cannot.
 
 The document is served with a content security policy that permits no inline
-script and no third-party origin, which is what keeps that budget at zero. See
-[Security](SECURITY.md) for the wider trust model.
+script and no third-party origin, which is what keeps that budget at zero. With
+Clerk on, it admits exactly what Clerk's SDK needs: the instance's own Frontend
+API origin, `img.clerk.com` for avatars, and Cloudflare Turnstile for Clerk's
+bot check. Inline script stays forbidden. See [Security](SECURITY.md) for the
+wider trust model.
 
 If the server rejects a key, the client drops it and returns to the unlock
 screen rather than leaving a signed-in UI that fails every request — and says
 why, quoting the error code, the message and the request id. Dropping the key
 silently was worse than not dropping it: the unlock appeared to work and then
-bounced, with nothing to read.
+bounced, with nothing to read. A refused Clerk session is signed out the same
+way, and the screen says the account is not linked to any ApplyTrail data,
+since signing in itself worked.
 
 The commonest cause of a refusal is not a bad key but the wrong database. A key
 exists only in the database it was created in, so one minted against local

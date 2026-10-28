@@ -159,18 +159,19 @@ func toDomainSearchProfile(r sqlcgen.SearchProfile) (domain.SearchProfile, error
 
 func toDomainSearchRun(r sqlcgen.SearchRun) domain.SearchRun {
 	return domain.SearchRun{
-		ID:               r.ID,
-		TenantID:         r.TenantID,
-		ProfileID:        r.ProfileID,
-		Source:           domain.Source(r.Source),
-		Query:            r.Query,
-		CandidatesSeen:   int(r.CandidatesSeen),
-		NewCount:         int(r.NewCount),
-		DuplicateCount:   int(r.DuplicateCount),
-		NeedsReviewCount: int(r.NeedsReviewCount),
-		StartedAt:        r.StartedAt,
-		FinishedAt:       r.FinishedAt,
-		Notes:            r.Notes,
+		ID:                 r.ID,
+		TenantID:           r.TenantID,
+		ProfileID:          r.ProfileID,
+		Source:             domain.Source(r.Source),
+		Query:              r.Query,
+		CandidatesSeen:     int(r.CandidatesSeen),
+		NewCount:           int(r.NewCount),
+		EligibleAgainCount: int(r.EligibleAgainCount),
+		DuplicateCount:     int(r.DuplicateCount),
+		NeedsReviewCount:   int(r.NeedsReviewCount),
+		StartedAt:          r.StartedAt,
+		FinishedAt:         r.FinishedAt,
+		Notes:              r.Notes,
 	}
 }
 

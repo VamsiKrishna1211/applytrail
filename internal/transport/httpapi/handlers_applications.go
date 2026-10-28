@@ -27,7 +27,7 @@ type recordApplicationRequestDTO struct {
 
 func (h *handlers) handleRecordApplication(w http.ResponseWriter, r *http.Request) {
 	var body recordApplicationRequestDTO
-	if err := decodeJSON(r, &body); err != nil {
+	if err := decodeJSON(w, r, &body); err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -77,7 +77,7 @@ func (h *handlers) handleUpdateApplication(w http.ResponseWriter, r *http.Reques
 	}
 
 	var body updateApplicationRequestDTO
-	if err := decodeJSON(r, &body); err != nil {
+	if err := decodeJSON(w, r, &body); err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -113,7 +113,7 @@ func (h *handlers) handleAddNote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body noteRequestDTO
-	if err := decodeJSON(r, &body); err != nil {
+	if err := decodeJSON(w, r, &body); err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -135,7 +135,12 @@ type listApplicationsResponseDTO struct {
 func (h *handlers) handleListApplications(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 
-	filter := store.ApplicationListFilter{Limit: intParam(query.Get("limit"), 50)}
+	limit, err := intParam("limit", query.Get("limit"), 50, maxLimit)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	filter := store.ApplicationListFilter{Limit: limit}
 	for _, status := range query["status"] {
 		filter.Statuses = append(filter.Statuses, domain.Status(status))
 	}
@@ -189,7 +194,13 @@ func (h *handlers) handleGetApplication(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	detail, err := h.svc.GetApplication(r.Context(), principalOf(r), id, intParam(r.URL.Query().Get("event_limit"), 100))
+	eventLimit, err := intParam("event_limit", r.URL.Query().Get("event_limit"), 100, maxLimit)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+
+	detail, err := h.svc.GetApplication(r.Context(), principalOf(r), id, eventLimit)
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -224,7 +235,12 @@ func (h *handlers) handleFollowups(w http.ResponseWriter, r *http.Request) {
 		asOf = &parsed
 	}
 
-	followUps, err := h.svc.GetFollowupsDue(r.Context(), principalOf(r), asOf, intParam(r.URL.Query().Get("limit"), 50))
+	limit, err := intParam("limit", r.URL.Query().Get("limit"), 50, maxLimit)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	followUps, err := h.svc.GetFollowupsDue(r.Context(), principalOf(r), asOf, limit)
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -250,13 +266,45 @@ func chiParam(r *http.Request, param string) string {
 	return chi.URLParam(r, param)
 }
 
-func intParam(raw string, fallback int) int {
+// maxLimit mirrors the store's own clampLimit ceiling (internal/store/postgres,
+// shared by every list query). Keeping the handler's clamp equal to the
+// store's is what makes intParam's returned value the value actually used,
+// rather than a guess that can drift from it.
+const maxLimit = 500
+
+// intParam is for a limit-shaped query parameter: empty means "use the
+// default", but anything else that is not a positive integer is the caller's
+// mistake and must not be silently treated the same as if nothing had been
+// sent — an agent that typo'd ?limit=fifty deserves a 400, not results it
+// cannot tell were capped at the fallback instead of what it asked for.
+// Anything above max is clamped rather than rejected, and the caller gets the
+// clamped value back so pagination can be computed against what was actually
+// used, not what was asked for.
+func intParam(name, raw string, fallback, max int) (int, error) {
 	if raw == "" {
-		return fallback
+		return fallback, nil
 	}
 	n, err := strconv.Atoi(raw)
 	if err != nil || n <= 0 {
-		return fallback
+		return 0, domain.NewValidationError(name + " must be a positive integer")
 	}
-	return n
+	if n > max {
+		return max, nil
+	}
+	return n, nil
+}
+
+// boolParam parses a boolean query parameter with strconv.ParseBool, which
+// accepts 1/t/T/TRUE/true/True and the 0/f/F/FALSE/false/False equivalents.
+// An unrecognised value ("yes", "TRU", a stray space) used to silently mean
+// "false" no matter what it actually said; now it is a 400.
+func boolParam(name, raw string, fallback bool) (bool, error) {
+	if raw == "" {
+		return fallback, nil
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, domain.NewValidationError(name + " must be a boolean")
+	}
+	return v, nil
 }

@@ -28,11 +28,19 @@ func (i Identity) Found() bool { return i.ExternalID != "" }
 // IDs, but Workday requisition numbers are per-tenant, so "R-12345" exists at
 // thousands of companies at once. Comparing the bare ID would report two
 // unrelated jobs as the same one.
+//
+// Returns "" when no job ID was actually extracted, even if a company slug
+// was: "blueorigin/" is not an identity, it is a failed extraction, and
+// writing it to storage as if it were one lets the next equally-failed
+// extraction from the same employer collide with it on the unique index.
 func (i Identity) Key() string {
+	if i.ExternalID == "" {
+		return ""
+	}
 	if i.CompanySlug == "" {
 		return i.ExternalID
 	}
-	return strings.ToLower(i.CompanySlug) + "/" + i.ExternalID
+	return strings.ToLower(i.CompanySlug) + "/" + strings.ToLower(i.ExternalID)
 }
 
 // extractor recognises one applicant tracking system.
@@ -57,9 +65,11 @@ var extractors = []extractor{
 	{
 		source: domain.SourceGreenhouse,
 		hosts:  []string{"greenhouse.io"},
-		path:   regexp.MustCompile(`^/(?:embed/job_app\?for=)?(?P<company>[^/]+)/jobs/(?P<id>\d+)`),
+		path:   regexp.MustCompile(`^/(?P<company>[^/]+)/jobs/(?P<id>\d+)`),
 		// Greenhouse boards embedded on a company's own site pass the job in
-		// the query string instead of the path.
+		// the query string instead of the path — see hostIndependentQuery
+		// below, which is what actually reaches embeds, since an embed is by
+		// definition NOT on a greenhouse.io host.
 		query: []string{"gh_jid"},
 	},
 	{
@@ -76,8 +86,10 @@ var extractors = []extractor{
 		source: domain.SourceWorkday,
 		hosts:  []string{"myworkdayjobs.com", "myworkdaysite.com"},
 		// Workday appends the requisition ID to the slug after an underscore:
-		// .../job/Austin/Senior-Engineer_R-12345
-		path: regexp.MustCompile(`/job/[^/]+/[^/]*_(?P<id>[A-Za-z]{1,4}-?\d{3,})`),
+		// .../job/Austin/Senior-Engineer_R-12345. The location segment is
+		// optional — .../job/Senior-Engineer_R-12345 is just as common — so it
+		// is not required to match.
+		path: regexp.MustCompile(`/job/(?:[^/]+/)?[^/]*_(?P<id>[A-Za-z]{1,4}-?\d{3,})`),
 		// Requisition IDs repeat across tenants, so the employer subdomain is
 		// what makes the identity unique.
 		companyFromSubdomain: true,
@@ -96,8 +108,11 @@ var extractors = []extractor{
 		source: domain.SourceLinkedIn,
 		hosts:  []string{"linkedin.com"},
 		// Both /jobs/view/4012345 and the slug form
-		// /jobs/view/software-engineer-at-acme-4012345.
-		path:  regexp.MustCompile(`^/jobs/view/(?:[^/]*?-)?(?P<id>\d{6,})`),
+		// /jobs/view/software-engineer-at-acme-4012345. The id is always the
+		// trailing run of digits, so the prefix match is greedy and anchored
+		// at the end: a slug containing an earlier number
+		// ("engineer-123456-at-acme-4012345") must not be mistaken for it.
+		path:  regexp.MustCompile(`^/jobs/view/(?:.*-)?(?P<id>\d{6,})/?$`),
 		query: []string{"currentJobId"},
 	},
 	{
@@ -105,6 +120,22 @@ var extractors = []extractor{
 		hosts:  []string{"indeed.com"},
 		query:  []string{"jk", "vjk"},
 	},
+}
+
+// hostIndependentQuery extracts an identity from a query parameter regardless
+// of host, for the case an ATS's board is embedded on the employer's own
+// domain rather than the ATS's — precisely where a host-scoped extractor by
+// definition cannot help.
+//
+// Each parameter here is distinctive enough on its own to not misfire on an
+// unrelated site's query string.
+var hostIndependentQuery = []struct {
+	source domain.Source
+	param  string
+}{
+	{source: domain.SourceGreenhouse, param: "gh_jid"},
+	{source: domain.SourceIndeed, param: "jk"},
+	{source: domain.SourceIndeed, param: "vjk"},
 }
 
 // ExtractIdentity parses an ATS job identity out of a URL.
@@ -158,6 +189,14 @@ func ExtractIdentity(raw string) Identity {
 		// The host is recognised even when the job ID is not, which is still
 		// worth reporting: it labels the posting's origin.
 		return Identity{Source: e.source, CompanySlug: identity.CompanySlug}
+	}
+
+	// No host matched at all — try the query parameters an embedded board
+	// carries regardless of whose domain it is embedded on.
+	for _, q := range hostIndependentQuery {
+		if v := u.Query().Get(q.param); v != "" {
+			return Identity{Source: q.source, ExternalID: v}
+		}
 	}
 	return Identity{}
 }

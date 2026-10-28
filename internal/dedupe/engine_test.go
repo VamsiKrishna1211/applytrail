@@ -310,3 +310,172 @@ func TestEngine_EmptyBatch(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, results)
 }
+
+// These five pairs are drawn from a real ApplyTrail deployment's data, where
+// the engine missed every one of them: BucketLocation reduced enough of the
+// location text to noise that the fingerprint and the fuzzy tier's location
+// filter both saw two different jobs. Each subtest is one pair, in the shape
+// it actually occurred.
+func TestEngine_Tier3And5_ProductionLocationMisses(t *testing.T) {
+	t.Run("a specific city and a remote label for the same posting", func(t *testing.T) {
+		// Blue River Technology, "Machine Learning Engineer, Autonomy": one
+		// listing named Sunnyvale, the other just said "US, Remote".
+		engine, store, tenantID := newEngine(t)
+		store.seed(t, "Blue River Technology", domain.Candidate{
+			Title:    "Machine Learning Engineer, Autonomy",
+			Location: "Sunnyvale, CA",
+		}, domain.StatusDiscovered, now.AddDate(0, 0, -1))
+
+		got := filterOne(t, engine, tenantID, domain.Candidate{
+			URL:      "https://jobs.khoslaventures.com/companies/blue-river-technology-2/jobs/90277310",
+			Title:    "Machine Learning Engineer, Autonomy",
+			Company:  "Blue River Technology",
+			Location: "US, Remote",
+		})
+		assert.Equal(t, domain.VerdictDuplicate, got.Verdict)
+	})
+
+	t.Run("a placeholder location must not block a real match", func(t *testing.T) {
+		// CircuitHub, "Computer Vision Engineer": one listing said "Remote
+		// (US/UK)", the other said only "Not stated".
+		engine, store, tenantID := newEngine(t)
+		store.seed(t, "CircuitHub", domain.Candidate{
+			Title:    "Computer Vision Engineer (Founding CV Team)",
+			Location: "Remote (US/UK)",
+		}, domain.StatusDiscovered, now.AddDate(0, 0, -1))
+
+		got := filterOne(t, engine, tenantID, domain.Candidate{
+			URL:      "https://ycombinator.com/companies/circuithub/jobs/js2U2cL-computer-vision-engineer",
+			Title:    "Computer Vision Engineer",
+			Company:  "CircuitHub",
+			Location: "Not stated",
+		})
+		assert.Equal(t, domain.VerdictDuplicate, got.Verdict)
+	})
+
+	t.Run("a placeholder location on the candidate side, matched via the fuzzy tier", func(t *testing.T) {
+		// Niantic Spatial, "Senior Computer Vision Engineer": the parenthetical
+		// (Reconstruction) vs (Localization) is stripped by title
+		// normalisation either way, so only the location stood between this
+		// pair and a match. "Not specified" carries no bucket at all, so tier
+		// 3's exact fingerprint still misses it (there is nothing to hash
+		// against "san francisco"), but tier 5 treats an unknown location as
+		// compatible with anything and resolves it on title alone.
+		engine, store, tenantID := newEngine(t)
+		store.seed(t, "Niantic Spatial", domain.Candidate{
+			Title:    "Senior Computer Vision Engineer (Reconstruction)",
+			Location: "San Francisco, CA / Sunnyvale, CA",
+		}, domain.StatusDiscovered, now.AddDate(0, 0, -1))
+
+		got := filterOne(t, engine, tenantID, domain.Candidate{
+			URL:      "https://jobs.ashbyhq.com/niantic-spatial/5f63e446-b7d0-4c75-8921-f9512d28e4c1",
+			Title:    "Senior Computer Vision Engineer (Localization)",
+			Company:  "Niantic Spatial",
+			Location: "Not specified",
+		})
+		assert.Equal(t, domain.VerdictDuplicate, got.Verdict)
+		assert.Equal(t, domain.TierFuzzy, got.Tier)
+	})
+
+	t.Run("a multi-site listing must match a later single-site sighting of any of its sites", func(t *testing.T) {
+		// Treeswift, "Robotics Engineer (Perception)": one listing named only
+		// Philadelphia, the other listed three cities including it.
+		engine, store, tenantID := newEngine(t)
+		store.seed(t, "Treeswift", domain.Candidate{
+			Title:    "Robotics Engineer (Perception)",
+			Location: "Philadelphia, PA",
+		}, domain.StatusDiscovered, now.AddDate(0, 0, -1))
+
+		got := filterOne(t, engine, tenantID, domain.Candidate{
+			URL:      "https://jobs.ashbyhq.com/treeswift/2048138a-8e0f-48f5-b04d-f0159b610c29",
+			Title:    "Robotics Engineer (Perception)",
+			Company:  "Treeswift",
+			Location: "Manhattan/SF/Philadelphia",
+		})
+		assert.Equal(t, domain.VerdictDuplicate, got.Verdict)
+		assert.Equal(t, domain.TierFingerprint, got.Tier)
+	})
+
+	t.Run("a parenthetical aside on the location must not create a new bucket", func(t *testing.T) {
+		// World Labs, "Research Engineer / Scientist (SLAM)": one listing
+		// said "San Francisco, CA", the other appended "(relocation required)".
+		engine, store, tenantID := newEngine(t)
+		store.seed(t, "World Labs", domain.Candidate{
+			Title:    "Research Engineer / Scientist (SLAM)",
+			Location: "San Francisco, CA",
+		}, domain.StatusDiscovered, now.AddDate(0, 0, -1))
+
+		got := filterOne(t, engine, tenantID, domain.Candidate{
+			URL:      "https://job-boards.greenhouse.io/worldlabs/jobs/4135311009",
+			Title:    "Research Engineer / Scientist (SLAM)",
+			Company:  "World Labs",
+			Location: "San Francisco (relocation required)",
+		})
+		assert.Equal(t, domain.VerdictDuplicate, got.Verdict)
+		assert.Equal(t, domain.TierFingerprint, got.Tier)
+	})
+}
+
+// Tier 4 must not cross a company boundary: two different employers reusing
+// the same agency boilerplate are not the same job. Globex has a posting of
+// its own on record (a different description) so its company row exists and
+// the tier 4 lookup actually runs scoped to it, rather than trivially
+// skipping because "an employer with no postings on record cannot have a
+// duplicate" — this is what proves the company_id filter itself, not just
+// the absence of a Globex row.
+func TestEngine_Tier4_ScopedToOneCompany(t *testing.T) {
+	engine, store, tenantID := newEngine(t)
+
+	description := "We are hiring an engineer to design and operate distributed systems " +
+		"serving millions of requests per second. You will own services end to end, " +
+		"from design review through production operation, and mentor other engineers " +
+		"on the platform team. This posting was placed through a staffing agency."
+
+	store.seed(t, "Acme, Inc.", domain.Candidate{
+		URL:         "https://boards.greenhouse.io/acme/jobs/1",
+		Title:       "Distributed Systems Engineer",
+		Description: description,
+	}, domain.StatusDiscovered, now.AddDate(0, 0, -2))
+	store.seed(t, "Globex", domain.Candidate{
+		URL:         "https://boards.greenhouse.io/globex/jobs/2",
+		Title:       "Unrelated Sales Role",
+		Description: "A completely different posting, long enough to hash but sharing no text with the engineering one above at all, padded out well past the two hundred character minimum so it is actually eligible for tier four hashing in the first place.",
+	}, domain.StatusDiscovered, now.AddDate(0, 0, -2))
+
+	got := filterOne(t, engine, tenantID, domain.Candidate{
+		URL:         "https://boards.greenhouse.io/globex/jobs/9",
+		Title:       "Platform Infrastructure Specialist",
+		Company:     "Globex",
+		Description: description,
+	})
+
+	assert.Equal(t, domain.VerdictNew, got.Verdict,
+		"identical boilerplate at a different employer must not be reported as the same job")
+}
+
+// A case that genuinely reaches the fuzzy tier's duplicate branch, not tier
+// 3: the normalised title is identical (so the score is 1.0, comfortably
+// past MatchThreshold), but the fingerprint still cannot match because the
+// two locations hash to different buckets ("remote" vs a specific city) with
+// no bucket in common. Tier 5's location check treats "remote" as compatible
+// with anything, which is what lets this resolve instead of being reported
+// new.
+func TestEngine_Tier5_FuzzyTitleReachesDuplicateVerdict(t *testing.T) {
+	engine, store, tenantID := newEngine(t)
+	store.seed(t, "Acme, Inc.", domain.Candidate{
+		URL:      "https://boards.greenhouse.io/acme/jobs/1",
+		Title:    "Senior Software Engineer II",
+		Location: "Remote",
+	}, domain.StatusApplied, now.AddDate(0, 0, -5))
+
+	got := filterOne(t, engine, tenantID, domain.Candidate{
+		URL:      "https://acme.com/careers/9",
+		Title:    "Sr. SWE II",
+		Company:  "Acme",
+		Location: "New York, NY",
+	})
+	assert.Equal(t, domain.VerdictDuplicate, got.Verdict)
+	assert.Equal(t, domain.TierFuzzy, got.Tier,
+		"tier 3 must not have already resolved this via the fingerprint")
+	assert.Equal(t, 1.0, got.Confidence)
+}

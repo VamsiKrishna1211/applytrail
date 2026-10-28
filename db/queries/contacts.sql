@@ -20,16 +20,19 @@ SELECT * FROM contacts WHERE id = @id AND tenant_id = @tenant_id;
 SELECT * FROM contacts
 WHERE tenant_id = @tenant_id
   AND (sqlc.narg('company_id')::uuid IS NULL OR company_id = sqlc.narg('company_id')::uuid)
-ORDER BY updated_at DESC
+ORDER BY updated_at DESC, id DESC
 LIMIT @row_limit;
 
+-- tenant_id is carried on the link row itself (migration 00005), not just
+-- reachable through a join: nothing about (application_id, contact_id) alone
+-- prevents linking across tenants, since the table has no other tenant guard.
 -- name: LinkContactToApplication :exec
-INSERT INTO application_contacts (application_id, contact_id)
-VALUES (@application_id, @contact_id)
+INSERT INTO application_contacts (tenant_id, application_id, contact_id)
+VALUES (@tenant_id, @application_id, @contact_id)
 ON CONFLICT DO NOTHING;
 
 -- name: ListContactsForApplication :many
 SELECT c.* FROM contacts c
-JOIN application_contacts ac ON ac.contact_id = c.id
+JOIN application_contacts ac ON ac.contact_id = c.id AND ac.tenant_id = c.tenant_id
 WHERE ac.application_id = @application_id AND c.tenant_id = @tenant_id
-ORDER BY c.updated_at DESC;
+ORDER BY c.updated_at DESC, c.id DESC;

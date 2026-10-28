@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"fmt"
 	"slices"
 	"time"
 )
@@ -63,7 +62,7 @@ type APIKey struct {
 	// used to find the single candidate row to verify against, so verification
 	// costs one hash rather than one per key in the table.
 	Prefix string
-	// Hash is an argon2id hash of the full key.
+	// Hash is a SHA-256 hash of the full key (see internal/auth/apikey).
 	Hash string
 
 	Label  string
@@ -108,6 +107,5 @@ func (p Principal) RequireScope(scope Scope) error {
 	if p.HasScope(scope) {
 		return nil
 	}
-	return fmt.Errorf("%w: key %q holds %v, which does not include %q",
-		ErrPermissionDenied, p.KeyLabel, p.Scopes, scope)
+	return NewPermissionError(p.KeyLabel, p.Scopes, scope)
 }

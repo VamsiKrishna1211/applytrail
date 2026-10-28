@@ -11,7 +11,7 @@ import (
 )
 
 func testHandler() http.Handler {
-	return &handler{fsys: fstest.MapFS{
+	return &handler{csp: contentSecurityPolicy(Options{}), fsys: fstest.MapFS{
 		"index.html":              {Data: []byte("<!doctype html><title>ApplyTrail</title>")},
 		"assets/index-abc123.js":  {Data: []byte("console.log(1)")},
 		"assets/index-abc123.css": {Data: []byte(":root{}")},
@@ -68,6 +68,17 @@ func TestSecurityHeaders(t *testing.T) {
 	assert.Contains(t, csp, "script-src 'self'", "inline script must stay impossible: this page holds a credential")
 	assert.Contains(t, csp, "frame-ancestors 'none'")
 	assert.Equal(t, "nosniff", response.Header.Get("X-Content-Type-Options"))
+	assert.NotContains(t, csp, "https:", "without Clerk, nothing loads from another origin")
+}
+
+func TestSecurityHeadersWithClerk(t *testing.T) {
+	csp := contentSecurityPolicy(Options{ClerkFrontendAPI: "https://example.clerk.accounts.dev"})
+
+	assert.Contains(t, csp, "script-src 'self' https://example.clerk.accounts.dev https://challenges.cloudflare.com;")
+	assert.Contains(t, csp, "connect-src 'self' https://example.clerk.accounts.dev;")
+	assert.Contains(t, csp, "frame-src https://challenges.cloudflare.com;")
+	assert.NotContains(t, csp, "unsafe-eval")
+	assert.NotContains(t, csp, "script-src 'self' 'unsafe-inline'", "Clerk does not need inline script")
 }
 
 func TestOnlyReadMethods(t *testing.T) {
@@ -84,5 +95,5 @@ func TestHandlerIsNilWithoutABundle(t *testing.T) {
 	if Available() {
 		t.Skip("built with -tags webui, so a bundle is embedded")
 	}
-	assert.Nil(t, Handler())
+	assert.Nil(t, Handler(Options{}))
 }

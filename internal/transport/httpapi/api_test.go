@@ -460,3 +460,54 @@ func TestFollowupsOverHTTP(t *testing.T) {
 	assert.Equal(t, 30, due.Followups[0].DaysSinceApplied)
 	assert.Equal(t, 16, due.Followups[0].DaysOverdue)
 }
+
+// A garbage limit must 400, not be silently treated as the default: an agent
+// that mistyped ?limit=fifty deserves to know its param was rejected, not
+// results it cannot tell were capped instead of what it asked for.
+func TestListApplications_BadLimitIsRejected(t *testing.T) {
+	api := newTestAPI(t, nil)
+
+	for _, bad := range []string{"fifty", "-1", "0"} {
+		resp, payload := api.do(t, http.MethodGet, "/v1/applications?limit="+bad, api.adminKey, nil)
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode, "limit=%s body: %s", bad, payload)
+	}
+}
+
+// A full page must carry a next_cursor, and — the actual bug — this must
+// still hold when the client asked for more than the 500-row ceiling:
+// filter.Limit has to be the value the store actually clamped to and used,
+// not the raw client value, or "500 rows returned" never equals "1000 rows
+// requested" and next_cursor is never set even though the page was full.
+func TestListApplications_NextCursorSurvivesAnOversizedLimit(t *testing.T) {
+	api := newTestAPI(t, nil)
+
+	// Genuinely distinct normalized titles: "Engineer I/II/III" would all
+	// normalize to "engineer" (roman numerals are stripped as level markers)
+	// and fingerprint-collide onto one posting, defeating the fixture.
+	titles := []string{"Backend Engineer", "Frontend Engineer", "Platform Engineer"}
+	for i, title := range titles {
+		resp, payload := api.do(t, http.MethodPost, "/v1/applications", api.adminKey, map[string]any{
+			// Distinct titles: identical ones would fingerprint-collide onto
+			// one posting (same company, same title, same location) and
+			// leave fewer than 3 applications, defeating the fixture.
+			"posting": candidate("40123"+string(rune('0'+i)), title),
+		})
+		require.Equal(t, http.StatusCreated, resp.StatusCode, "body: %s", payload)
+	}
+
+	// This exercises limit=3 (filter.Limit == requested), not the 500-row
+	// ceiling itself: reaching that boundary needs 500+ fixture rows, which
+	// is disproportionate to this test's cost. What matters here is that
+	// filter.Limit — whatever intParam clamped it to — is what next_cursor's
+	// presence is computed against, and that holds regardless of where the
+	// clamp lands.
+	resp, payload := api.do(t, http.MethodGet, "/v1/applications?limit=3", api.adminKey, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, "body: %s", payload)
+
+	page := decode[struct {
+		Applications []struct{} `json:"applications"`
+		NextCursor   string     `json:"next_cursor"`
+	}](t, payload)
+	assert.Len(t, page.Applications, 3)
+	assert.NotEmpty(t, page.NextCursor, "a full page implies there may be more")
+}

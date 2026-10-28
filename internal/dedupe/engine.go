@@ -17,7 +17,7 @@ type Lookup interface {
 	FindByCanonicalURLs(ctx context.Context, tenantID domain.ID, urls []string) ([]domain.PostingRef, error)
 	FindByExternalIDs(ctx context.Context, tenantID domain.ID, keys []domain.SourceKey) ([]domain.PostingRef, error)
 	FindByFingerprints(ctx context.Context, tenantID domain.ID, fingerprints []string) ([]domain.PostingRef, error)
-	FindByDescriptionHashes(ctx context.Context, tenantID domain.ID, hashes []string) ([]domain.PostingRef, error)
+	FindByDescriptionHashes(ctx context.Context, tenantID domain.ID, companyIDs []domain.ID, hashes []string) ([]domain.PostingRef, error)
 	FindFuzzyCandidates(ctx context.Context, tenantID, companyID domain.ID, normalizedTitle string, limit int) ([]domain.PostingRef, error)
 }
 
@@ -93,13 +93,25 @@ func (e *Engine) WithClock(now func() time.Time) *Engine {
 type Normalized struct {
 	Candidate domain.Candidate
 
-	CanonicalURL    string
-	Identity        Identity
-	Company         string
-	Title           string
-	LocationBucket  string
-	Fingerprint     string
-	DescriptionHash string
+	CanonicalURL string
+	Identity     Identity
+	Company      string
+	Title        string
+	// LocationBucket is the single value stored on a posting row: the
+	// primary site a multi-site location names, or the sole bucket otherwise.
+	LocationBucket string
+	// LocationBucketCandidates is every plausible bucket the location could
+	// mean, used only for matching. A multi-site candidate ("Manhattan/SF/
+	// Philadelphia") can therefore be recognised against a posting stored
+	// under any one of its sites, even though only the primary site is ever
+	// persisted. Always a superset of {LocationBucket}.
+	LocationBucketCandidates []string
+	Fingerprint              string
+	// FingerprintCandidates mirrors LocationBucketCandidates: one fingerprint
+	// per plausible location bucket, so tier 3 can match a multi-site
+	// candidate against a posting stored under any one of its sites.
+	FingerprintCandidates []string
+	DescriptionHash       string
 }
 
 // Normalize reduces a candidate to its comparable keys.
@@ -116,17 +128,38 @@ func Normalize(c domain.Candidate) Normalized {
 	}
 
 	title := NormalizeTitle(c.Title)
-	bucket := BucketLocation(c.Location)
+	buckets := BucketLocationCandidates(c.Location)
+	bucket := ""
+	if len(buckets) > 0 {
+		bucket = buckets[0]
+	}
+
+	fingerprints := make([]string, 0, len(buckets)+1)
+	seen := make(map[string]bool, len(buckets)+1)
+	for _, b := range buckets {
+		fp := Fingerprint(company, title, b)
+		if !seen[fp] {
+			seen[fp] = true
+			fingerprints = append(fingerprints, fp)
+		}
+	}
+	if len(fingerprints) == 0 {
+		// No location signal at all: fall back to the single unlocated
+		// fingerprint so this candidate is still matchable.
+		fingerprints = append(fingerprints, Fingerprint(company, title, ""))
+	}
 
 	return Normalized{
-		Candidate:       c,
-		CanonicalURL:    CanonicalizeURL(c.URL),
-		Identity:        identity,
-		Company:         company,
-		Title:           title,
-		LocationBucket:  bucket,
-		Fingerprint:     Fingerprint(company, title, bucket),
-		DescriptionHash: DescriptionHash(c.Description),
+		Candidate:                c,
+		CanonicalURL:             CanonicalizeURL(c.URL),
+		Identity:                 identity,
+		Company:                  company,
+		Title:                    title,
+		LocationBucket:           bucket,
+		LocationBucketCandidates: buckets,
+		Fingerprint:              Fingerprint(company, title, bucket),
+		FingerprintCandidates:    fingerprints,
+		DescriptionHash:          DescriptionHash(c.Description),
 	}
 }
 

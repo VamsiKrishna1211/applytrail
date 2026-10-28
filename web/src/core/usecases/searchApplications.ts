@@ -21,6 +21,10 @@ function haystack(application: Application): string {
     application.cover_letter_variant,
     application.notes,
     statusLabel(application.status),
+    // The posting-link commit put the URL on screen (MoveBar, the drawer);
+    // this was the one field that landed there without landing here too, so
+    // searching by job-board host or requisition id silently matched nothing.
+    application.url,
   ]
     .filter(Boolean)
     .join('\n')

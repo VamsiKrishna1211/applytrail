@@ -14,7 +14,7 @@ import (
 // it is read-only and safe to retry.
 func (h *handlers) handleFilterPostings(w http.ResponseWriter, r *http.Request) {
 	var body filterRequestDTO
-	if err := decodeJSON(r, &body); err != nil {
+	if err := decodeJSON(w, r, &body); err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -55,7 +55,7 @@ func (h *handlers) handleFilterPostings(w http.ResponseWriter, r *http.Request) 
 // handleIngestPostings records discoveries.
 func (h *handlers) handleIngestPostings(w http.ResponseWriter, r *http.Request) {
 	var body ingestRequestDTO
-	if err := decodeJSON(r, &body); err != nil {
+	if err := decodeJSON(w, r, &body); err != nil {
 		writeError(w, r, err)
 		return
 	}

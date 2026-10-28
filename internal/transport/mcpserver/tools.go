@@ -37,7 +37,7 @@ type PostingInput struct {
 	PostedAt        string   `json:"posted_at,omitempty" jsonschema:"when the job was posted, RFC3339"`
 }
 
-func (p PostingInput) toDomain() domain.Candidate {
+func (p PostingInput) toDomain() (domain.Candidate, error) {
 	candidate := domain.Candidate{
 		URL:         p.URL,
 		Title:       p.Title,
@@ -55,18 +55,32 @@ func (p PostingInput) toDomain() domain.Candidate {
 		VisaSponsorship: p.VisaSponsorship,
 		TechTags:        p.TechTags,
 	}
-	if posted, ok := parseTime(p.PostedAt); ok {
-		candidate.PostedAt = &posted
+	posted, err := parseTimeArg("posted_at", p.PostedAt)
+	if err != nil {
+		return domain.Candidate{}, err
 	}
-	return candidate
+	candidate.PostedAt = posted
+	return candidate, nil
 }
 
-func toCandidates(inputs []PostingInput) []domain.Candidate {
+// toCandidates converts a batch, reporting every malformed posted_at at once
+// rather than failing on the first: an agent submitting two hundred
+// candidates deserves the full list of what to fix, not one error per retry.
+func toCandidates(inputs []PostingInput) ([]domain.Candidate, error) {
 	candidates := make([]domain.Candidate, len(inputs))
+	var v domain.ValidationError
 	for i, in := range inputs {
-		candidates[i] = in.toDomain()
+		c, err := in.toDomain()
+		if err != nil {
+			v.Addf("candidates[%d]: %s", i, err.Error())
+			continue
+		}
+		candidates[i] = c
 	}
-	return candidates
+	if err := v.OrNil(); err != nil {
+		return nil, err
+	}
+	return candidates, nil
 }
 
 // VerdictOutput is one candidate's answer. It reports the evidence alongside
@@ -260,15 +274,19 @@ func (s *Server) addFilterNewPostings(srv *mcp.Server, p domain.Principal) {
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, args filterArgs) (*mcp.CallToolResult, filterOutput, error) {
 		return call(func() (filterOutput, error) {
-			runID, err := optionalID(args.SearchRunID)
+			runID, err := optionalID("search_run_id", args.SearchRunID)
 			if err != nil {
 				return filterOutput{}, err
 			}
 
+			candidates, err := toCandidates(args.Candidates)
+			if err != nil {
+				return filterOutput{}, err
+			}
 			resp, err := s.svc.FilterPostings(ctx, p, service.FilterRequest{
 				ProfileName: args.Profile,
 				SearchRunID: runID,
-				Candidates:  toCandidates(args.Candidates),
+				Candidates:  candidates,
 			})
 			if err != nil {
 				return filterOutput{}, err
@@ -329,15 +347,19 @@ func (s *Server) addRecordDiscoveries(srv *mcp.Server, p domain.Principal) {
 		Annotations: &mcp.ToolAnnotations{IdempotentHint: true},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, args recordDiscoveriesArgs) (*mcp.CallToolResult, recordDiscoveriesOutput, error) {
 		return call(func() (recordDiscoveriesOutput, error) {
-			runID, err := optionalID(args.SearchRunID)
+			runID, err := optionalID("search_run_id", args.SearchRunID)
 			if err != nil {
 				return recordDiscoveriesOutput{}, err
 			}
 
+			candidates, err := toCandidates(args.Postings)
+			if err != nil {
+				return recordDiscoveriesOutput{}, err
+			}
 			resp, err := s.svc.IngestPostings(ctx, p, service.IngestRequest{
 				ProfileName: args.Profile,
 				SearchRunID: runID,
-				Candidates:  toCandidates(args.Postings),
+				Candidates:  candidates,
 			})
 			if err != nil {
 				return recordDiscoveriesOutput{}, err
@@ -411,18 +433,23 @@ func (s *Server) addRecordApplication(srv *mcp.Server, p domain.Principal) {
 				Notes:              args.Notes,
 				FollowUpInDays:     args.FollowUpInDays,
 			}
-			postingID, err := optionalID(args.PostingID)
+			postingID, err := optionalID("posting_id", args.PostingID)
 			if err != nil {
 				return applicationOutput{}, err
 			}
 			req.PostingID = postingID
 			if args.Posting != nil {
-				candidate := args.Posting.toDomain()
+				candidate, err := args.Posting.toDomain()
+				if err != nil {
+					return applicationOutput{}, err
+				}
 				req.Candidate = &candidate
 			}
-			if appliedAt, ok := parseTime(args.AppliedAt); ok {
-				req.AppliedAt = &appliedAt
+			appliedAt, err := parseTimeArg("applied_at", args.AppliedAt)
+			if err != nil {
+				return applicationOutput{}, err
 			}
+			req.AppliedAt = appliedAt
 
 			application, err := s.svc.RecordApplication(ctx, p, req)
 			if err != nil {
@@ -436,11 +463,12 @@ func (s *Server) addRecordApplication(srv *mcp.Server, p domain.Principal) {
 // --- 5. update_application_status -------------------------------------------
 
 type updateStatusArgs struct {
-	ApplicationID string `json:"application_id"`
-	Status        string `json:"status" jsonschema:"screening, interview, offer, accepted, rejected, ghosted, withdrawn, screened_out, or queued"`
-	OccurredAt    string `json:"occurred_at,omitempty" jsonschema:"when this happened, RFC3339; defaults to now"`
-	Note          string `json:"note,omitempty" jsonschema:"what happened, kept on the timeline"`
-	NextActionAt  string `json:"next_action_at,omitempty" jsonschema:"when to chase next, RFC3339"`
+	ApplicationID   string `json:"application_id"`
+	Status          string `json:"status" jsonschema:"discovered, screened_out, queued, applied, screening, interview, offer, accepted, rejected, ghosted, or withdrawn"`
+	OccurredAt      string `json:"occurred_at,omitempty" jsonschema:"when this happened, RFC3339; defaults to now"`
+	Note            string `json:"note,omitempty" jsonschema:"what happened, kept on the timeline"`
+	NextActionAt    string `json:"next_action_at,omitempty" jsonschema:"when to chase next, RFC3339"`
+	ClearNextAction bool   `json:"clear_next_action,omitempty" jsonschema:"remove any scheduled follow-up without setting a new one; terminal statuses do this automatically"`
 }
 
 func (s *Server) addUpdateApplicationStatus(srv *mcp.Server, p domain.Principal) {
@@ -457,16 +485,21 @@ func (s *Server) addUpdateApplicationStatus(srv *mcp.Server, p domain.Principal)
 			}
 
 			req := service.UpdateStatusRequest{
-				ApplicationID: id,
-				Status:        domain.Status(args.Status),
-				Note:          args.Note,
+				ApplicationID:   id,
+				Status:          domain.Status(args.Status),
+				Note:            args.Note,
+				ClearNextAction: args.ClearNextAction,
 			}
-			if occurredAt, ok := parseTime(args.OccurredAt); ok {
-				req.OccurredAt = &occurredAt
+			occurredAt, err := parseTimeArg("occurred_at", args.OccurredAt)
+			if err != nil {
+				return applicationOutput{}, err
 			}
-			if nextAction, ok := parseTime(args.NextActionAt); ok {
-				req.NextActionAt = &nextAction
+			req.OccurredAt = occurredAt
+			nextAction, err := parseTimeArg("next_action_at", args.NextActionAt)
+			if err != nil {
+				return applicationOutput{}, err
 			}
+			req.NextActionAt = nextAction
 
 			application, err := s.svc.UpdateStatus(ctx, p, req)
 			if err != nil {
@@ -483,7 +516,7 @@ type listApplicationsArgs struct {
 	Statuses []string `json:"statuses,omitempty" jsonschema:"filter to these pipeline statuses"`
 	Company  string   `json:"company,omitempty" jsonschema:"filter to one employer by name"`
 	Since    string   `json:"since,omitempty" jsonschema:"only applications tracked since this time, RFC3339"`
-	Limit    int      `json:"limit,omitempty" jsonschema:"maximum rows to return; defaults to 50"`
+	Limit    int      `json:"limit,omitempty" jsonschema:"maximum rows to return; defaults to 50, capped at 500"`
 }
 
 type listApplicationsOutput struct {
@@ -506,9 +539,11 @@ func (s *Server) addListApplications(srv *mcp.Server, p domain.Principal) {
 			for _, status := range args.Statuses {
 				filter.Statuses = append(filter.Statuses, domain.Status(status))
 			}
-			if since, ok := parseTime(args.Since); ok {
-				filter.Since = &since
+			since, err := parseTimeArg("since", args.Since)
+			if err != nil {
+				return listApplicationsOutput{}, err
 			}
+			filter.Since = since
 
 			rows, err := s.svc.ListApplications(ctx, p, filter)
 			if err != nil {
@@ -535,7 +570,7 @@ func (s *Server) addListApplications(srv *mcp.Server, p domain.Principal) {
 
 type followupsArgs struct {
 	AsOf  string `json:"as_of,omitempty" jsonschema:"treat this time as now, RFC3339"`
-	Limit int    `json:"limit,omitempty"`
+	Limit int    `json:"limit,omitempty" jsonschema:"maximum rows to return; defaults to 50, capped at 500"`
 }
 
 type followupOutput struct {
@@ -557,9 +592,9 @@ func (s *Server) addGetFollowupsDue(srv *mcp.Server, p domain.Principal) {
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, args followupsArgs) (*mcp.CallToolResult, followupsOutput, error) {
 		return call(func() (followupsOutput, error) {
-			var asOf *time.Time
-			if parsed, ok := parseTime(args.AsOf); ok {
-				asOf = &parsed
+			asOf, err := parseTimeArg("as_of", args.AsOf)
+			if err != nil {
+				return followupsOutput{}, err
 			}
 
 			due, err := s.svc.GetFollowupsDue(ctx, p, asOf, args.Limit)
@@ -636,9 +671,12 @@ func (s *Server) addUpsertContact(srv *mcp.Server, p domain.Principal) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "upsert_contact",
 		Description: "Record a recruiter or hiring manager, optionally linked to an application. " +
-			"Matching is by email when one is given, so repeated calls update one record rather than " +
-			"creating several.",
-		Annotations: &mcp.ToolAnnotations{IdempotentHint: true},
+			"Matching is by email: give one and a repeated call updates that one record. Without an " +
+			"email there is no reliable way to recognise the same person again, so each call creates a " +
+			"new contact — pass one whenever you might call this again for the same person.",
+		// Not IdempotentHint: true is not always accurate here. It only holds
+		// when email is given; a name-only contact inserts a new row every
+		// call, and the annotation has no way to say "sometimes".
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, args upsertContactArgs) (*mcp.CallToolResult, contactOutput, error) {
 		return call(func() (contactOutput, error) {
 			req := service.UpsertContactRequest{
@@ -651,14 +689,16 @@ func (s *Server) addUpsertContact(srv *mcp.Server, p domain.Principal) {
 				},
 				CompanyName: args.Company,
 			}
-			applicationID, err := optionalID(args.ApplicationID)
+			applicationID, err := optionalID("application_id", args.ApplicationID)
 			if err != nil {
 				return contactOutput{}, err
 			}
 			req.LinkToApplicationID = applicationID
-			if lastContact, ok := parseTime(args.LastContactAt); ok {
-				req.Contact.LastContactAt = &lastContact
+			lastContact, err := parseTimeArg("last_contact_at", args.LastContactAt)
+			if err != nil {
+				return contactOutput{}, err
 			}
+			req.Contact.LastContactAt = lastContact
 
 			contact, err := s.svc.UpsertContact(ctx, p, req)
 			if err != nil {
@@ -681,27 +721,33 @@ func (s *Server) addUpsertContact(srv *mcp.Server, p domain.Principal) {
 
 // --- helpers ----------------------------------------------------------------
 
-// parseTime accepts RFC3339 and a bare date, because models write both. An
-// unparseable value is reported as absent rather than as an error: a malformed
-// optional timestamp should not sink an otherwise valid call.
-func parseTime(raw string) (time.Time, bool) {
-	if raw == "" {
-		return time.Time{}, false
-	}
-	if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
-		return parsed, true
-	}
-	if parsed, err := time.Parse(time.DateOnly, raw); err == nil {
-		return parsed, true
-	}
-	return time.Time{}, false
-}
-
-func optionalID(raw string) (*domain.ID, error) {
+// parseTimeArg accepts RFC3339 and a bare date, because models write both.
+// An empty value means "not given" and returns (nil, nil). A value that is
+// present but unparseable is a caller mistake and returns an error — the
+// REST transport already 400s on a malformed since/due_before, and MCP used
+// to silently treat the same input as absent, which the two surfaces
+// disagreeing about is worse than either behaviour on its own.
+func parseTimeArg(field, raw string) (*time.Time, error) {
 	if raw == "" {
 		return nil, nil
 	}
-	id, err := domain.ParseID("id", raw)
+	if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+		return &parsed, nil
+	}
+	if parsed, err := time.Parse(time.DateOnly, raw); err == nil {
+		return &parsed, nil
+	}
+	return nil, domain.NewValidationError(field + " must be RFC3339 or YYYY-MM-DD")
+}
+
+// optionalID parses an argument that is an id when present. field names which
+// argument failed, so "search_run_id must be a UUID" does not get reported as
+// "id must be a UUID" regardless of which field was actually wrong.
+func optionalID(field, raw string) (*domain.ID, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	id, err := domain.ParseID(field, raw)
 	if err != nil {
 		return nil, err
 	}

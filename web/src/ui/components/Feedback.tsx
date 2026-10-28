@@ -26,8 +26,11 @@ export function ErrorNotice({ error, what }: { error: unknown; what: string }) {
       <div>{message}</div>
       {api && api.details.length > 0 ? (
         <ul className={styles.details}>
-          {api.details.map((detail) => (
-            <li key={detail}>{detail}</li>
+          {api.details.map((detail, index) => (
+            // Not key={detail}: the API can legitimately repeat the same
+            // problem string (details is a flat list of field-level messages,
+            // not a set), which collided on the text as a key.
+            <li key={index}>{detail}</li>
           ))}
         </ul>
       ) : null}

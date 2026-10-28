@@ -10,6 +10,8 @@
  * This port carries the reason from the transport to the unlock screen.
  */
 export interface AuthRejection {
+  /** Which credential was refused: a pasted API key, or a sign-in session. */
+  credential: 'api_key' | 'sign_in'
   /** The server's error code, or `network` when it never answered. */
   code: string
   message: string

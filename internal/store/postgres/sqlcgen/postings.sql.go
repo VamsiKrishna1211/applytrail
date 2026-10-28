@@ -36,7 +36,7 @@ SELECT p.id, p.canonical_url, p.normalized_title, p.location_bucket,
        a.id AS application_id, a.status AS application_status,
        similarity(p.normalized_title, $1::text) AS score
 FROM postings p
-LEFT JOIN applications a ON a.posting_id = p.id
+LEFT JOIN applications a ON a.posting_id = p.id AND a.tenant_id = p.tenant_id
 WHERE p.tenant_id = $2
   AND p.company_id = $3
   AND p.normalized_title % $1::text
@@ -103,11 +103,11 @@ func (q *Queries) FindFuzzyPostingCandidates(ctx context.Context, arg FindFuzzyP
 
 const findPostingsByCanonicalURLs = `-- name: FindPostingsByCanonicalURLs :many
 
-SELECT p.id, p.canonical_url, p.source, p.external_id, p.fingerprint,
+SELECT p.id, p.company_id, p.canonical_url, p.source, p.external_id, p.fingerprint,
        p.description_hash, p.first_seen_at, p.last_seen_at,
        a.id AS application_id, a.status AS application_status
 FROM postings p
-LEFT JOIN applications a ON a.posting_id = p.id
+LEFT JOIN applications a ON a.posting_id = p.id AND a.tenant_id = p.tenant_id
 WHERE p.tenant_id = $1
   AND p.canonical_url = ANY ($2::text[])
 `
@@ -119,6 +119,7 @@ type FindPostingsByCanonicalURLsParams struct {
 
 type FindPostingsByCanonicalURLsRow struct {
 	ID                uuid.UUID
+	CompanyID         uuid.UUID
 	CanonicalUrl      string
 	Source            string
 	ExternalID        string
@@ -134,6 +135,12 @@ type FindPostingsByCanonicalURLsRow struct {
 // candidate set, rather than one per candidate. Each returns the joined
 // application status so the resurfacing policy can be applied without a
 // second query.
+//
+// Every join below is pinned to the posting's own tenant_id, not just the
+// outer WHERE clause: the schema does not forbid an applications row from
+// pointing at another tenant's posting (the unique constraint is on
+// (tenant_id, posting_id), not on posting_id alone), so an unpinned join is a
+// latent cross-tenant leak of application_status, not just a redundant guard.
 func (q *Queries) FindPostingsByCanonicalURLs(ctx context.Context, arg FindPostingsByCanonicalURLsParams) ([]FindPostingsByCanonicalURLsRow, error) {
 	rows, err := q.db.Query(ctx, findPostingsByCanonicalURLs, arg.TenantID, arg.CanonicalUrls)
 	if err != nil {
@@ -145,6 +152,7 @@ func (q *Queries) FindPostingsByCanonicalURLs(ctx context.Context, arg FindPosti
 		var i FindPostingsByCanonicalURLsRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.CompanyID,
 			&i.CanonicalUrl,
 			&i.Source,
 			&i.ExternalID,
@@ -166,23 +174,26 @@ func (q *Queries) FindPostingsByCanonicalURLs(ctx context.Context, arg FindPosti
 }
 
 const findPostingsByDescriptionHashes = `-- name: FindPostingsByDescriptionHashes :many
-SELECT p.id, p.canonical_url, p.source, p.external_id, p.fingerprint,
+SELECT p.id, p.company_id, p.canonical_url, p.source, p.external_id, p.fingerprint,
        p.description_hash, p.first_seen_at, p.last_seen_at,
        a.id AS application_id, a.status AS application_status
 FROM postings p
-LEFT JOIN applications a ON a.posting_id = p.id
+LEFT JOIN applications a ON a.posting_id = p.id AND a.tenant_id = p.tenant_id
 WHERE p.tenant_id = $1
+  AND p.company_id = ANY ($2::uuid[])
   AND p.description_hash <> ''
-  AND p.description_hash = ANY ($2::text[])
+  AND p.description_hash = ANY ($3::text[])
 `
 
 type FindPostingsByDescriptionHashesParams struct {
 	TenantID          uuid.UUID
+	CompanyIds        []uuid.UUID
 	DescriptionHashes []string
 }
 
 type FindPostingsByDescriptionHashesRow struct {
 	ID                uuid.UUID
+	CompanyID         uuid.UUID
 	CanonicalUrl      string
 	Source            string
 	ExternalID        string
@@ -194,8 +205,12 @@ type FindPostingsByDescriptionHashesRow struct {
 	ApplicationStatus *string
 }
 
+// Scoped to the candidates' own employers, like the fuzzy tier: two different
+// companies reposting the same boilerplate text are not the same job, and a
+// content hash alone cannot tell the difference. The company filter is
+// necessary, not just an optimisation.
 func (q *Queries) FindPostingsByDescriptionHashes(ctx context.Context, arg FindPostingsByDescriptionHashesParams) ([]FindPostingsByDescriptionHashesRow, error) {
-	rows, err := q.db.Query(ctx, findPostingsByDescriptionHashes, arg.TenantID, arg.DescriptionHashes)
+	rows, err := q.db.Query(ctx, findPostingsByDescriptionHashes, arg.TenantID, arg.CompanyIds, arg.DescriptionHashes)
 	if err != nil {
 		return nil, err
 	}
@@ -205,6 +220,7 @@ func (q *Queries) FindPostingsByDescriptionHashes(ctx context.Context, arg FindP
 		var i FindPostingsByDescriptionHashesRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.CompanyID,
 			&i.CanonicalUrl,
 			&i.Source,
 			&i.ExternalID,
@@ -226,11 +242,11 @@ func (q *Queries) FindPostingsByDescriptionHashes(ctx context.Context, arg FindP
 }
 
 const findPostingsByExternalIDs = `-- name: FindPostingsByExternalIDs :many
-SELECT p.id, p.canonical_url, p.source, p.external_id, p.fingerprint,
+SELECT p.id, p.company_id, p.canonical_url, p.source, p.external_id, p.fingerprint,
        p.description_hash, p.first_seen_at, p.last_seen_at,
        a.id AS application_id, a.status AS application_status
 FROM postings p
-LEFT JOIN applications a ON a.posting_id = p.id
+LEFT JOIN applications a ON a.posting_id = p.id AND a.tenant_id = p.tenant_id
 WHERE p.tenant_id = $1
   AND p.external_id <> ''
   AND (p.source || '|' || p.external_id) = ANY ($2::text[])
@@ -243,6 +259,7 @@ type FindPostingsByExternalIDsParams struct {
 
 type FindPostingsByExternalIDsRow struct {
 	ID                uuid.UUID
+	CompanyID         uuid.UUID
 	CanonicalUrl      string
 	Source            string
 	ExternalID        string
@@ -268,6 +285,7 @@ func (q *Queries) FindPostingsByExternalIDs(ctx context.Context, arg FindPosting
 		var i FindPostingsByExternalIDsRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.CompanyID,
 			&i.CanonicalUrl,
 			&i.Source,
 			&i.ExternalID,
@@ -289,11 +307,11 @@ func (q *Queries) FindPostingsByExternalIDs(ctx context.Context, arg FindPosting
 }
 
 const findPostingsByFingerprints = `-- name: FindPostingsByFingerprints :many
-SELECT p.id, p.canonical_url, p.source, p.external_id, p.fingerprint,
+SELECT p.id, p.company_id, p.canonical_url, p.source, p.external_id, p.fingerprint,
        p.description_hash, p.first_seen_at, p.last_seen_at,
        a.id AS application_id, a.status AS application_status
 FROM postings p
-LEFT JOIN applications a ON a.posting_id = p.id
+LEFT JOIN applications a ON a.posting_id = p.id AND a.tenant_id = p.tenant_id
 WHERE p.tenant_id = $1
   AND p.fingerprint = ANY ($2::text[])
 `
@@ -305,6 +323,7 @@ type FindPostingsByFingerprintsParams struct {
 
 type FindPostingsByFingerprintsRow struct {
 	ID                uuid.UUID
+	CompanyID         uuid.UUID
 	CanonicalUrl      string
 	Source            string
 	ExternalID        string
@@ -327,6 +346,7 @@ func (q *Queries) FindPostingsByFingerprints(ctx context.Context, arg FindPostin
 		var i FindPostingsByFingerprintsRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.CompanyID,
 			&i.CanonicalUrl,
 			&i.Source,
 			&i.ExternalID,

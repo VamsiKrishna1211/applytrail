@@ -82,6 +82,53 @@ paths:
                   status: { type: string, example: ok }
                   version: { type: string }
 
+  /auth/config:
+    get:
+      operationId: getWebConfig
+      summary: How the web UI signs in
+      description: |
+        Read by the browser client before it holds a credential. With Clerk
+        sign-in configured it carries the instance's publishable key, which
+        is public by design; otherwise the object is empty and the client
+        asks for an API key.
+      security: []
+      tags: [admin]
+      responses:
+        "200":
+          description: the sign-in configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebConfig"
+
+  /mcp:
+    post:
+      operationId: mcp
+      summary: The same capabilities, over the Model Context Protocol
+      tags: [admin]
+      description: |
+        Every REST endpoint under `/v1` has an MCP-tool equivalent here,
+        backed by the same service layer — not modelled as REST operations
+        because MCP's Streamable HTTP transport is JSON-RPC-shaped, not
+        request/response-per-resource, and does not map onto OpenAPI's
+        operation model. Authentication is identical: the same `Authorization`
+        header a REST caller sends. See docs/MCP.md for the tool list and
+        docs/ROUTINE.md for the intended call sequence.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              description: a JSON-RPC 2.0 request, per the MCP Streamable HTTP transport
+              type: object
+      responses:
+        "200":
+          description: a JSON-RPC 2.0 response
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
   /v1/postings:filter:
     post:
       operationId: filterPostings
@@ -109,6 +156,12 @@ paths:
               schema: { $ref: "#/components/schemas/FilterResponse" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: the named profile does not exist for this tenant
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "429": { $ref: "#/components/responses/RateLimited" }
 
   /v1/postings:ingest:
@@ -136,7 +189,16 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/IngestResponse" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: |
+            a fingerprint collision on insert — two candidates in the batch
+            (or a candidate and an existing row) resolved to the same
+            (tenant, fingerprint) key at write time
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /v1/applications:
     get:
@@ -327,7 +389,13 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/SearchProfile" }
 
-  /v1/search-profiles/{name}:
+  # GET and PATCH are documented on one path item, not two ("{name}" and
+  # "{id}"): both route to the identical URL shape (chi dispatches by method,
+  # not by the path parameter's name), and two path items that are identical
+  # after template substitution is invalid OpenAPI — most tooling silently
+  # drops one, which is worse than one item with two differently-typed
+  # parameters describing what each operation actually expects.
+  /v1/search-profiles/{profileRef}:
     get:
       operationId: getSearchProfile
       summary: Fetch a profile with its effective resurfacing policy
@@ -337,7 +405,11 @@ paths:
         defaults, so a caller sees every cooldown that will actually apply
         rather than only the deviations this profile chose to record.
       parameters:
-        - { name: name, in: path, required: true, schema: { type: string } }
+        - name: profileRef
+          in: path
+          required: true
+          description: the profile's name
+          schema: { type: string }
       responses:
         "200":
           description: the profile
@@ -353,8 +425,6 @@ paths:
                   runs_today: { type: integer }
                   last_run_at: { type: string, format: date-time }
         "404": { $ref: "#/components/responses/NotFound" }
-
-  /v1/search-profiles/{id}:
     patch:
       operationId: updateSearchProfile
       summary: Update a targeting profile
@@ -364,7 +434,11 @@ paths:
         array clears it. Addressed by id rather than name, because a rename is
         one of the things this endpoint can do.
       parameters:
-        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - name: profileRef
+          in: path
+          required: true
+          description: the profile's id (uuid), not its name
+          schema: { type: string, format: uuid }
       requestBody:
         required: true
         content:
@@ -641,6 +715,14 @@ components:
           schema: { $ref: "#/components/schemas/Error" }
 
   schemas:
+    WebConfig:
+      type: object
+      properties:
+        clerk_publishable_key:
+          type: string
+          description: Present when the web UI should offer Clerk sign-in.
+          example: pk_test_ZXhhbXBsZS5jbGVyay5hY2NvdW50cy5kZXYk
+
     Error:
       type: object
       properties:
@@ -649,7 +731,7 @@ components:
           properties:
             code:
               type: string
-              enum: [invalid_argument, unauthenticated, permission_denied, not_found, conflict, rate_limited, internal]
+              enum: [invalid_argument, unauthenticated, permission_denied, not_found, conflict, rate_limited, internal, method_not_allowed, not_ready]
             message: { type: string }
             details:
               type: array
@@ -684,7 +766,14 @@ components:
         title: { type: string }
         company: { type: string }
         location: { type: string }
-        source: { type: string, enum: [greenhouse, lever, ashby, workday, smartrecruiters, workable, linkedin, indeed, company_site, referral, other] }
+        source:
+          type: string
+          description: |
+            Common values: greenhouse, lever, ashby, workday, smartrecruiters,
+            workable, linkedin, indeed, company_site, referral, other. Not a
+            closed set — an unrecognised value is preserved verbatim rather
+            than rejected, so a board this list does not name yet still works.
+          example: greenhouse
         description: { type: string }
         posted_at: { type: string, format: date-time }
         remote_type: { type: string, enum: ["", remote, hybrid, onsite] }
@@ -827,6 +916,12 @@ components:
         to_status: { $ref: "#/components/schemas/Status" }
         occurred_at: { type: string, format: date-time }
         actor: { type: string, description: the credential label, or "system" }
+        payload:
+          type: object
+          description: |
+            Event-specific detail — a note's text, a resume variant, a
+            resurfacing tier and verdict. Shape varies by `type` and is not
+            itself part of this contract.
 
     Contact:
       type: object
@@ -892,6 +987,7 @@ components:
         query: { type: string }
         candidates_seen: { type: integer }
         new_count: { type: integer }
+        eligible_again_count: { type: integer }
         duplicate_count: { type: integer }
         needs_review_count: { type: integer }
         started_at: { type: string, format: date-time }

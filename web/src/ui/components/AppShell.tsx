@@ -1,4 +1,5 @@
 import { NavLink, Outlet, useSearchParams } from 'react-router-dom'
+import { useClerkState } from '@/app/ClerkSession'
 import { useCredential } from '@/app/ServicesProvider'
 import { cx } from '@/ui/cx'
 import { ApplicationDrawer } from './ApplicationDrawer'
@@ -24,6 +25,7 @@ const NAV = [
  */
 export function AppShell({ wide = false, fill = false }: { wide?: boolean; fill?: boolean }) {
   const credential = useCredential()
+  const clerk = useClerkState()
 
   // The open application is a URL parameter, not component state: it survives
   // a reload, it is linkable, and both pages open the same drawer without
@@ -52,14 +54,27 @@ export function AppShell({ wide = false, fill = false }: { wide?: boolean; fill?
         <div className={styles.credential}>
           <ThemeToggle />
 
-          {/* The last four characters only. A credential that is fully legible
-              on screen is one a screen share leaks. */}
-          <span className={styles.token} title="the key this session is using">
-            at_live_…{credential.fingerprint}
-          </span>
-          <button type="button" className={styles.signout} onClick={credential.clear}>
-            sign out
-          </button>
+          {credential.unlocked ? (
+            <>
+              {/* The last four characters only. A credential that is fully
+                  legible on screen is one a screen share leaks. */}
+              <span className={styles.token} title="the key this session is using">
+                at_live_…{credential.fingerprint}
+              </span>
+              <button type="button" className={styles.signout} onClick={credential.clear}>
+                sign out
+              </button>
+            </>
+          ) : (
+            <>
+              <span className={styles.token} title="signed in with Clerk">
+                {clerk.label ?? 'signed in'}
+              </span>
+              <button type="button" className={styles.signout} onClick={clerk.signOut}>
+                sign out
+              </button>
+            </>
+          )}
         </div>
       </header>
 

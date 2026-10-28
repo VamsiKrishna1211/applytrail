@@ -71,7 +71,7 @@ type PostingStore interface {
 	FindByCanonicalURLs(ctx context.Context, tenantID domain.ID, urls []string) ([]domain.PostingRef, error)
 	FindByExternalIDs(ctx context.Context, tenantID domain.ID, keys []domain.SourceKey) ([]domain.PostingRef, error)
 	FindByFingerprints(ctx context.Context, tenantID domain.ID, fingerprints []string) ([]domain.PostingRef, error)
-	FindByDescriptionHashes(ctx context.Context, tenantID domain.ID, hashes []string) ([]domain.PostingRef, error)
+	FindByDescriptionHashes(ctx context.Context, tenantID domain.ID, companyIDs []domain.ID, hashes []string) ([]domain.PostingRef, error)
 
 	// FindFuzzyCandidates shortlists postings at one company whose normalized
 	// title is trigram-similar to the given one. Scoring and thresholds stay
@@ -87,7 +87,11 @@ type PostingStore interface {
 // ApplicationListFilter narrows a pipeline listing. Zero values mean "no
 // filter", and Cursor implements keyset pagination.
 type ApplicationListFilter struct {
-	Statuses              []domain.Status
+	Statuses []domain.Status
+	// CompanyNormalizedName must already be normalized (dedupe.NormalizeCompany)
+	// by the time it reaches the store: this is compared directly against
+	// companies.normalized_name. Service.ListApplications does that
+	// normalization, so callers of the service may pass a raw display name.
 	CompanyNormalizedName string
 	Since                 *time.Time
 	Cursor                *Cursor
@@ -184,7 +188,7 @@ type ContactStore interface {
 	Upsert(ctx context.Context, contact domain.Contact) (domain.Contact, error)
 	Get(ctx context.Context, tenantID, id domain.ID) (domain.Contact, error)
 	List(ctx context.Context, tenantID domain.ID, companyID *domain.ID, limit int) ([]domain.Contact, error)
-	LinkToApplication(ctx context.Context, applicationID, contactID domain.ID) error
+	LinkToApplication(ctx context.Context, tenantID, applicationID, contactID domain.ID) error
 	ListForApplication(ctx context.Context, tenantID, applicationID domain.ID) ([]domain.Contact, error)
 }
 
@@ -212,15 +216,21 @@ type SearchProfileStore interface {
 	GetByName(ctx context.Context, tenantID domain.ID, name string) (domain.SearchProfile, error)
 	List(ctx context.Context, tenantID domain.ID, activeOnly bool) ([]domain.SearchProfile, error)
 	Update(ctx context.Context, tenantID, id domain.ID, u SearchProfileUpdate) (domain.SearchProfile, error)
+	// NamesByIDs resolves a batch of profile ids to names in one round trip,
+	// for annotating a list of search runs without an N+1 lookup. A missing
+	// id (deleted since the run referencing it was recorded) is simply absent
+	// from the result.
+	NamesByIDs(ctx context.Context, tenantID domain.ID, ids []domain.ID) (map[domain.ID]string, error)
 }
 
 // SearchRunProgress is a batch of counts to add to a run's totals. Counts
 // accumulate so a long routine can report incrementally.
 type SearchRunProgress struct {
-	CandidatesSeen   int
-	NewCount         int
-	DuplicateCount   int
-	NeedsReviewCount int
+	CandidatesSeen     int
+	NewCount           int
+	EligibleAgainCount int
+	DuplicateCount     int
+	NeedsReviewCount   int
 }
 
 // SearchRunFilter narrows a run listing.
@@ -236,4 +246,8 @@ type SearchRunStore interface {
 	RecordProgress(ctx context.Context, tenantID, id domain.ID, p SearchRunProgress) (domain.SearchRun, error)
 	Finish(ctx context.Context, tenantID, id domain.ID, finishedAt time.Time, notes string) (domain.SearchRun, error)
 	List(ctx context.Context, tenantID domain.ID, f SearchRunFilter) ([]domain.SearchRun, error)
+	// CountSince returns the true count of a profile's runs since the given
+	// time — not capped the way a List call must be, so RunsToday reads
+	// correctly for a profile run more than once a day, every day.
+	CountSince(ctx context.Context, tenantID, profileID domain.ID, since time.Time) (int, error)
 }

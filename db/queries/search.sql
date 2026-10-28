@@ -47,20 +47,32 @@ VALUES (@tenant_id, @profile_id, @source, @query, @notes)
 RETURNING *;
 
 -- Counts accumulate across calls so a long routine can report incrementally
--- rather than buffering every result until the run ends.
+-- rather than buffering every result until the run ends. Guarded against a
+-- finished run: without it, a stale search_run_id keeps inflating a run's
+-- counters after FinishSearchRun has already closed it out.
 -- name: RecordSearchRunProgress :one
 UPDATE search_runs
-SET candidates_seen    = candidates_seen + @candidates_seen,
-    new_count          = new_count + @new_count,
-    duplicate_count    = duplicate_count + @duplicate_count,
-    needs_review_count = needs_review_count + @needs_review_count
-WHERE id = @id AND tenant_id = @tenant_id
+SET candidates_seen      = candidates_seen + @candidates_seen,
+    new_count            = new_count + @new_count,
+    eligible_again_count = eligible_again_count + @eligible_again_count,
+    duplicate_count      = duplicate_count + @duplicate_count,
+    needs_review_count   = needs_review_count + @needs_review_count
+WHERE id = @id AND tenant_id = @tenant_id AND finished_at IS NULL
 RETURNING *;
 
+-- Notes accumulate rather than overwrite, matching every other note field in
+-- the schema (application notes, contact notes): a second call appends
+-- instead of destroying what an earlier call recorded. finished_at is set
+-- once and never moved, so a repeat call is a safe, idempotent no-op on that
+-- column by design.
 -- name: FinishSearchRun :one
 UPDATE search_runs
 SET finished_at = COALESCE(finished_at, @finished_at),
-    notes       = CASE WHEN @notes::text <> '' THEN @notes ELSE notes END
+    notes       = CASE
+                     WHEN @notes::text = '' THEN notes
+                     WHEN notes = '' THEN @notes
+                     ELSE notes || E'\n' || @notes
+                   END
 WHERE id = @id AND tenant_id = @tenant_id
 RETURNING *;
 
@@ -69,5 +81,15 @@ SELECT * FROM search_runs
 WHERE tenant_id = @tenant_id
   AND (sqlc.narg('profile_id')::uuid IS NULL OR profile_id = sqlc.narg('profile_id')::uuid)
   AND (sqlc.narg('since')::timestamptz IS NULL OR started_at >= sqlc.narg('since')::timestamptz)
-ORDER BY started_at DESC
+ORDER BY started_at DESC, id DESC
 LIMIT @row_limit;
+
+-- name: GetSearchProfileNamesByIDs :many
+SELECT id, name FROM search_profiles WHERE tenant_id = @tenant_id AND id = ANY (@ids::uuid[]);
+
+-- The true count, not a length-of-a-capped-list stand-in: ProfileView.RunsToday
+-- used to be len(List(..., Limit: 100)), which silently read as "100" for
+-- any profile with more than 100 runs in a day.
+-- name: CountSearchRunsSince :one
+SELECT count(*) FROM search_runs
+WHERE tenant_id = @tenant_id AND profile_id = @profile_id AND started_at >= @since;

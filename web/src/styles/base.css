@@ -10,7 +10,17 @@ html {
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  /* iteration-count: 1, not just a near-zero duration: an `infinite` animation
+     (the loading skeleton's shimmer, Feedback.module.css) with a duration this
+     short does not read as "stopped" — it is a style-recalc hot loop running
+     as fast as the browser can manage, the opposite of what reduced motion
+     asks for. Capping the iteration count is what actually stops it, after
+     the one (now instant) frame. */
+  * {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
 }
 
 body {

@@ -124,6 +124,24 @@ func (s searchProfileStore) Update(ctx context.Context, tenantID, id domain.ID, 
 	return toDomainSearchProfile(row)
 }
 
+func (s searchProfileStore) NamesByIDs(ctx context.Context, tenantID domain.ID, ids []domain.ID) (map[domain.ID]string, error) {
+	if len(ids) == 0 {
+		return map[domain.ID]string{}, nil
+	}
+	rows, err := s.q.GetSearchProfileNamesByIDs(ctx, sqlcgen.GetSearchProfileNamesByIDsParams{
+		TenantID: tenantID,
+		Ids:      ids,
+	})
+	if err != nil {
+		return nil, translate("get search profile names", "search profile", err)
+	}
+	names := make(map[domain.ID]string, len(rows))
+	for _, row := range rows {
+		names[row.ID] = row.Name
+	}
+	return names, nil
+}
+
 type searchRunStore struct{ q *sqlcgen.Queries }
 
 func (s searchRunStore) Create(ctx context.Context, run domain.SearchRun) (domain.SearchRun, error) {
@@ -142,12 +160,13 @@ func (s searchRunStore) Create(ctx context.Context, run domain.SearchRun) (domai
 
 func (s searchRunStore) RecordProgress(ctx context.Context, tenantID, id domain.ID, p store.SearchRunProgress) (domain.SearchRun, error) {
 	row, err := s.q.RecordSearchRunProgress(ctx, sqlcgen.RecordSearchRunProgressParams{
-		ID:               id,
-		TenantID:         tenantID,
-		CandidatesSeen:   int32(p.CandidatesSeen),   //nolint:gosec // batch sizes are bounded by request limits
-		NewCount:         int32(p.NewCount),         //nolint:gosec // ditto
-		DuplicateCount:   int32(p.DuplicateCount),   //nolint:gosec // ditto
-		NeedsReviewCount: int32(p.NeedsReviewCount), //nolint:gosec // ditto
+		ID:                 id,
+		TenantID:           tenantID,
+		CandidatesSeen:     int32(p.CandidatesSeen),     //nolint:gosec // batch sizes are bounded by request limits
+		NewCount:           int32(p.NewCount),           //nolint:gosec // ditto
+		EligibleAgainCount: int32(p.EligibleAgainCount), //nolint:gosec // ditto
+		DuplicateCount:     int32(p.DuplicateCount),     //nolint:gosec // ditto
+		NeedsReviewCount:   int32(p.NeedsReviewCount),   //nolint:gosec // ditto
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.SearchRun{}, notFound("search run", id)
@@ -172,6 +191,18 @@ func (s searchRunStore) Finish(ctx context.Context, tenantID, id domain.ID, fini
 		return domain.SearchRun{}, translate("finish search run", "search run", err)
 	}
 	return toDomainSearchRun(row), nil
+}
+
+func (s searchRunStore) CountSince(ctx context.Context, tenantID, profileID domain.ID, since time.Time) (int, error) {
+	count, err := s.q.CountSearchRunsSince(ctx, sqlcgen.CountSearchRunsSinceParams{
+		TenantID:  tenantID,
+		ProfileID: &profileID,
+		Since:     since,
+	})
+	if err != nil {
+		return 0, translate("count search runs", "search run", err)
+	}
+	return int(count), nil
 }
 
 func (s searchRunStore) List(ctx context.Context, tenantID domain.ID, f store.SearchRunFilter) ([]domain.SearchRun, error) {

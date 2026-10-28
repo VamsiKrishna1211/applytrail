@@ -16,6 +16,10 @@ type Querier interface {
 	// Response rate per resume variant: of the applications sent with each
 	// variant, how many progressed past 'applied'.
 	CountResponsesByResumeVariant(ctx context.Context, tenantID uuid.UUID) ([]CountResponsesByResumeVariantRow, error)
+	// The true count, not a length-of-a-capped-list stand-in: ProfileView.RunsToday
+	// used to be len(List(..., Limit: 100)), which silently read as "100" for
+	// any profile with more than 100 runs in a day.
+	CountSearchRunsSince(ctx context.Context, arg CountSearchRunsSinceParams) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (ApiKey, error)
 	CreateSearchProfile(ctx context.Context, arg CreateSearchProfileParams) (SearchProfile, error)
 	CreateSearchRun(ctx context.Context, arg CreateSearchRunParams) (SearchRun, error)
@@ -32,13 +36,28 @@ type Querier interface {
 	// candidate set, rather than one per candidate. Each returns the joined
 	// application status so the resurfacing policy can be applied without a
 	// second query.
+	//
+	// Every join below is pinned to the posting's own tenant_id, not just the
+	// outer WHERE clause: the schema does not forbid an applications row from
+	// pointing at another tenant's posting (the unique constraint is on
+	// (tenant_id, posting_id), not on posting_id alone), so an unpinned join is a
+	// latent cross-tenant leak of application_status, not just a redundant guard.
 	FindPostingsByCanonicalURLs(ctx context.Context, arg FindPostingsByCanonicalURLsParams) ([]FindPostingsByCanonicalURLsRow, error)
+	// Scoped to the candidates' own employers, like the fuzzy tier: two different
+	// companies reposting the same boilerplate text are not the same job, and a
+	// content hash alone cannot tell the difference. The company filter is
+	// necessary, not just an optimisation.
 	FindPostingsByDescriptionHashes(ctx context.Context, arg FindPostingsByDescriptionHashesParams) ([]FindPostingsByDescriptionHashesRow, error)
 	// Matches on ATS identity. Source and external ID are compared as one
 	// "source|external_id" key so the whole candidate set is a single array
 	// parameter; the expression index in migration 00002 serves it directly.
 	FindPostingsByExternalIDs(ctx context.Context, arg FindPostingsByExternalIDsParams) ([]FindPostingsByExternalIDsRow, error)
 	FindPostingsByFingerprints(ctx context.Context, arg FindPostingsByFingerprintsParams) ([]FindPostingsByFingerprintsRow, error)
+	// Notes accumulate rather than overwrite, matching every other note field in
+	// the schema (application notes, contact notes): a second call appends
+	// instead of destroying what an earlier call recorded. finished_at is set
+	// once and never moved, so a repeat call is a safe, idempotent no-op on that
+	// column by design.
 	FinishSearchRun(ctx context.Context, arg FinishSearchRunParams) (SearchRun, error)
 	// Authentication path: the prefix is unique and indexed, so verification
 	// hashes exactly one candidate rather than every key in the table.
@@ -54,27 +73,42 @@ type Querier interface {
 	GetPosting(ctx context.Context, arg GetPostingParams) (Posting, error)
 	GetSearchProfile(ctx context.Context, arg GetSearchProfileParams) (SearchProfile, error)
 	GetSearchProfileByName(ctx context.Context, arg GetSearchProfileByNameParams) (SearchProfile, error)
+	GetSearchProfileNamesByIDs(ctx context.Context, arg GetSearchProfileNamesByIDsParams) ([]GetSearchProfileNamesByIDsRow, error)
 	GetTenant(ctx context.Context, id uuid.UUID) (Tenant, error)
 	GetTenantBySlug(ctx context.Context, slug string) (Tenant, error)
 	InsertApplication(ctx context.Context, arg InsertApplicationParams) (Application, error)
 	InsertApplicationEvent(ctx context.Context, arg InsertApplicationEventParams) (ApplicationEvent, error)
 	InsertPosting(ctx context.Context, arg InsertPostingParams) (Posting, error)
+	// tenant_id is carried on the link row itself (migration 00005), not just
+	// reachable through a join: nothing about (application_id, contact_id) alone
+	// prevents linking across tenants, since the table has no other tenant guard.
 	LinkContactToApplication(ctx context.Context, arg LinkContactToApplicationParams) error
 	ListAPIKeys(ctx context.Context, tenantID uuid.UUID) ([]ApiKey, error)
 	ListApplicationEvents(ctx context.Context, arg ListApplicationEventsParams) ([]ApplicationEvent, error)
 	// Keyset pagination on (created_at, id): stable under concurrent inserts,
 	// unlike OFFSET. Filters are optional; a NULL argument disables its clause.
+	//
+	// Both joins are tenant-pinned, not just the outer WHERE: the schema does not
+	// forbid an applications row from referencing another tenant's posting (the
+	// unique constraint is on (tenant_id, posting_id), not on posting_id alone),
+	// so an unpinned join is a latent cross-tenant read.
 	ListApplications(ctx context.Context, arg ListApplicationsParams) ([]ListApplicationsRow, error)
 	ListCompanies(ctx context.Context, tenantID uuid.UUID) ([]Company, error)
 	ListContacts(ctx context.Context, arg ListContactsParams) ([]Contact, error)
 	ListContactsForApplication(ctx context.Context, arg ListContactsForApplicationParams) ([]Contact, error)
 	// The follow-up queue: engaged applications whose next action is due.
+	// 'ghosted' is included even though it is not IsEngaged(): it is explicitly
+	// re-enterable (an employer can resurface after months of silence) and
+	// UpdateStatus only clears next_action_at on a *terminal* status, so a
+	// follow-up date set while ghosted must still be able to surface here.
 	ListFollowupsDue(ctx context.Context, arg ListFollowupsDueParams) ([]ListFollowupsDueRow, error)
 	ListSearchProfiles(ctx context.Context, arg ListSearchProfilesParams) ([]SearchProfile, error)
 	ListSearchRuns(ctx context.Context, arg ListSearchRunsParams) ([]SearchRun, error)
 	ListTenants(ctx context.Context) ([]Tenant, error)
 	// Counts accumulate across calls so a long routine can report incrementally
-	// rather than buffering every result until the run ends.
+	// rather than buffering every result until the run ends. Guarded against a
+	// finished run: without it, a stale search_run_id keeps inflating a run's
+	// counters after FinishSearchRun has already closed it out.
 	RecordSearchRunProgress(ctx context.Context, arg RecordSearchRunProgressParams) (SearchRun, error)
 	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) (ApiKey, error)
 	TouchAPIKey(ctx context.Context, arg TouchAPIKeyParams) error

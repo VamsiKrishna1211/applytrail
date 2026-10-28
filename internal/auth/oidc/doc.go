@@ -1,5 +1,9 @@
 // Package oidc is a placeholder for browser-based login.
 //
+// Clerk now fills most of this role: internal/auth/clerkauth verifies Clerk
+// API keys and Clerk OAuth access tokens behind the same port. What remains
+// for this package is the browser client's session login.
+//
 // ApplyTrail authenticates agents with API keys, which is the right fit for a
 // headless caller: no redirect flow, no token refresh, no browser. A hosted
 // deployment with a human-facing UI needs something else, and this package

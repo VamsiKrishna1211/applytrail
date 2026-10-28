@@ -17,6 +17,13 @@ export type ApiErrorCode =
   | 'rate_limited'
   | 'internal'
   | 'network'
+  // Not a code the server ever sends — deliberately absent from KNOWN_CODES
+  // below. It marks a response the client itself could not make sense of
+  // (mapping.ts's malformed()): a deterministic parse failure, which retrying
+  // the identical request cannot fix. It used to be tagged 'internal', which
+  // is retryable, so a guaranteed-to-fail-again parse error was retried
+  // three times for nothing.
+  | 'malformed_response'
 
 interface ErrorEnvelope {
   error?: {

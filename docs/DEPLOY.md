@@ -112,11 +112,20 @@ examples use `us-east5`, which is the closest Cloud Run region to Neon's
      --set-env-vars APPLYTRAIL_ENV=production,APPLYTRAIL_DB_MAX_CONNS=4 \
      --set-secrets APPLYTRAIL_DATABASE_URL=applytrail-db-url:latest \
      --min-instances 0 --max-instances 2 \
-     --cpu 1 --memory 512Mi --concurrency 40 --timeout 60s
+     --cpu 0.5 --memory 128Mi --concurrency 1 --cpu-boost --timeout 60s
    ```
 
    `--allow-unauthenticated` lets requests reach the container; ApplyTrail's own
    API key check is the actual authentication.
+
+   Half a CPU and 128 MiB is enough for one personal job search. Cloud Run
+   only allows less than one CPU with `--concurrency 1`, so each instance
+   serves one request at a time, and `--max-instances` is also the most
+   requests in flight. `--cpu-boost` gives a cold start the full CPU while
+   it starts up.
+
+   A later redeploy only needs `--image`: `gcloud run deploy` keeps every
+   setting it is not given, including anything changed in the console.
 
    `--max-instances` is a database setting as much as a cost setting: instances
    multiplied by `APPLYTRAIL_DB_MAX_CONNS` is your connection ceiling on a free
@@ -148,6 +157,36 @@ examples use `us-east5`, which is the closest Cloud Run region to Neon's
 
    For the claude.ai connector UI, which will not let you set `Authorization`,
    see [MCP.md](MCP.md).
+
+10. **Optionally, accept Clerk credentials**, so Claude can sign in with OAuth
+    instead of holding a key (see [CONFIGURATION.md](CONFIGURATION.md#clerk)).
+    The secret key goes in Secret Manager like the database URL. Paste it at
+    a hidden prompt rather than piping `pbpaste`: copying the command itself
+    replaces the key on the clipboard, and the command text gets stored as
+    the secret. `printf %s` adds no trailing newline, which Clerk would
+    reject:
+
+    ```bash
+    gcloud secrets create applytrail-clerk-secret-key --project $PROJECT
+    read -rs "KEY?Clerk secret key: " && printf %s "$KEY" | \
+      gcloud secrets versions add applytrail-clerk-secret-key \
+      --data-file=- --project $PROJECT && unset KEY
+    gcloud secrets add-iam-policy-binding applytrail-clerk-secret-key \
+      --member="serviceAccount:applytrail-run@$PROJECT.iam.gserviceaccount.com" \
+      --role=roles/secretmanager.secretAccessor --project $PROJECT
+
+    gcloud run services update applytrail --region $REGION \
+      --update-secrets APPLYTRAIL_CLERK_SECRET_KEY=applytrail-clerk-secret-key:latest \
+      --update-env-vars "^@^APPLYTRAIL_CLERK_TENANTS=user_...=<tenant uuid>@APPLYTRAIL_CLERK_ISSUER=https://<name>.clerk.accounts.dev@APPLYTRAIL_PUBLIC_URL=https://<service-url>@APPLYTRAIL_CLERK_PUBLISHABLE_KEY=pk_test_..."
+    ```
+
+    `^@^` switches the separator, because the tenants value can itself
+    contain commas. The publishable key is what makes the web UI offer Clerk
+    sign-in; it is public, so it needs no secret. Open the UI at
+    `<service-url>` itself: a session from Cloud Run's other URL for the same
+    service is refused unless that origin is listed in
+    `APPLYTRAIL_CLERK_WEB_ORIGINS`. `<service-url>/mcp` must be registered in Clerk as an MCP
+    server, exactly.
 
 ### Cold starts
 

@@ -53,6 +53,15 @@ type Deps struct {
 	// nothing else. The credential is supplied by the person using it and
 	// spent on /v1, which authenticates as it always has.
 	WebUI http.Handler
+
+	// ClerkPublishableKey, when set, tells the web UI to offer Clerk sign-in.
+	// It does not itself accept Clerk session tokens; Authenticator does that.
+	ClerkPublishableKey string
+
+	// ProtectedResource, when set, turns on OAuth discovery: the RFC 9728
+	// metadata document, and a 401 challenge that points at it. It does not
+	// itself accept OAuth tokens; Authenticator does that.
+	ProtectedResource *ProtectedResource
 }
 
 // NewRouter assembles the HTTP surface: health probes, the versioned REST API,
@@ -72,12 +81,25 @@ func NewRouter(deps Deps) http.Handler {
 	r.Get("/readyz", handleReady(deps.DB))
 	r.Get("/version", handleLive(deps.Version))
 
+	// The browser reads how to sign in before it holds a credential.
+	r.Get(webConfigPath, handleWebConfig(deps.ClerkPublishableKey))
+
+	// OAuth discovery is public for the same reason: a client reads it before
+	// it holds a credential. Both paths answer, because clients that do not
+	// append the resource path probe the bare one.
+	if deps.ProtectedResource != nil {
+		meta := handleProtectedResource(*deps.ProtectedResource)
+		r.Get(metadataPathPrefix, meta)
+		r.Get(metadataPathPrefix+"/*", meta)
+	}
+	authChallenge := challenge(deps.ProtectedResource)
+
 	// The MCP endpoint authenticates and rate-limits exactly like the REST
 	// API: the transport differs, the trust boundary does not.
 	if deps.MCPHandler != nil {
 		r.Group(func(r chi.Router) {
 			r.Use(otelMiddleware("mcp"))
-			r.Use(authenticate(deps.Authenticator, deps.AuthFailureLimiter))
+			r.Use(authenticate(deps.Authenticator, deps.AuthFailureLimiter, authChallenge))
 			if deps.Limiter != nil {
 				r.Use(rateLimit(deps.Limiter))
 			}
@@ -90,7 +112,7 @@ func NewRouter(deps Deps) http.Handler {
 		h := &handlers{svc: deps.Service}
 		r.Route("/v1", func(r chi.Router) {
 			r.Use(otelMiddleware("v1"))
-			r.Use(authenticate(deps.Authenticator, deps.AuthFailureLimiter))
+			r.Use(authenticate(deps.Authenticator, deps.AuthFailureLimiter, authChallenge))
 			if deps.Limiter != nil {
 				r.Use(rateLimit(deps.Limiter))
 			}
@@ -152,7 +174,7 @@ func NewRouter(deps Deps) http.Handler {
 // apiPrefixes are the paths that belong to a machine surface. A miss under one
 // of them is a routing mistake and must read as one, in the same JSON envelope
 // as every other API error — never as the browser client's index document.
-var apiPrefixes = []string{"/v1", "/mcp", "/healthz", "/readyz", "/version"}
+var apiPrefixes = []string{"/v1", "/mcp", "/healthz", "/readyz", "/version", "/.well-known", "/auth"}
 
 // notFound answers an unmatched path.
 //

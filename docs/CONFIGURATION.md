@@ -83,6 +83,45 @@ not a knob, and a deployment that raises it is only widening a guessing window.
 Traces name spans after the matched route pattern, so
 `/v1/applications/{id}` is one span name rather than one per application.
 
+## Clerk
+
+Optional, and off while `APPLYTRAIL_CLERK_SECRET_KEY` is empty. With it set,
+Clerk API keys (`ak_...`) work alongside ApplyTrail's own keys. With the issuer
+and public URL set too, so do Clerk OAuth tokens, and the server publishes the
+discovery metadata an MCP client needs to sign a user in. With the publishable
+key and public URL set, the web UI signs people in with Clerk (see
+[WEB-UI.md](WEB-UI.md#signing-in)). ApplyTrail's own keys keep working either way, and remain the only credential that can hold
+`admin`.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `APPLYTRAIL_CLERK_SECRET_KEY` | *(empty)* | The Clerk instance's secret key. Put it in Secret Manager, not on the command line. |
+| `APPLYTRAIL_CLERK_TENANTS` | *(empty)* | `user_abc=<tenant uuid>,org_def=<tenant uuid>`. Maps each Clerk user or organization to the tenant it acts for, and is the allowlist: any other Clerk account is refused. Required with the secret key. |
+| `APPLYTRAIL_CLERK_ISSUER` | *(empty)* | The instance's issuer, e.g. `https://<name>.clerk.accounts.dev`. Turns on OAuth. |
+| `APPLYTRAIL_PUBLIC_URL` | *(empty)* | This server's https origin. `<origin>/mcp` must match the MCP server URL registered in Clerk exactly, because OAuth tokens must name it as their audience. Required with the issuer. |
+| `APPLYTRAIL_CLERK_PUBLISHABLE_KEY` | *(empty)* | The instance's publishable key (`pk_test_...` or `pk_live_...`). Public by design. Turns on web UI sign-in. Requires the public URL. |
+| `APPLYTRAIL_CLERK_WEB_ORIGINS` | *(empty)* | Comma-separated extra origins the web UI is opened from, e.g. `http://localhost:5173` for `make web-dev`. The public URL's origin is always included; a session from any other origin is refused. |
+| `APPLYTRAIL_CLERK_API_URL` | Clerk's | Overrides Clerk's Backend API URL. For tests and proxies. |
+
+What a Clerk credential may do:
+
+- **API keys** with no scopes get `read` and `write`; those are what the
+  prebuilt Clerk profile UI creates. A key carrying `applytrail:read` and/or
+  `applytrail:write` gets exactly those. A key carrying scopes but neither of
+  those was minted for another service and is refused.
+- **OAuth tokens** get `read` and `write` for the signed-in user's tenant.
+  Clerk OAuth has no custom scopes to narrow them.
+- **Web sessions** get `read` and `write` for the signed-in user's tenant.
+  They are checked locally against Clerk's signing keys, which are fetched
+  once and refetched at most every five minutes, so a signed-in page costs no
+  Clerk call per request. Signing out in Clerk ends one within a minute, when
+  its token expires.
+- A successful API key or OAuth check is cached for a minute, never past the credential's own
+  expiry, so a revoked Clerk credential keeps working for up to a minute.
+- If Clerk does not answer, the request gets `503` with `Retry-After`, not
+  `401`: the credential may be fine, and it does not count toward the
+  failed-authentication budget.
+
 ## Not configurable, on purpose
 
 HTTP timeouts and the shutdown grace period are compiled in:

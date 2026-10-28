@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/VamsiKrishna1211/applytrail/internal/domain"
@@ -175,12 +176,13 @@ func applicationWithPostingToDTO(a store.ApplicationWithPosting) applicationDTO 
 }
 
 type eventDTO struct {
-	ID         string    `json:"id"`
-	Type       string    `json:"type"`
-	FromStatus string    `json:"from_status,omitempty"`
-	ToStatus   string    `json:"to_status,omitempty"`
-	OccurredAt time.Time `json:"occurred_at"`
-	Actor      string    `json:"actor,omitempty"`
+	ID         string          `json:"id"`
+	Type       string          `json:"type"`
+	FromStatus string          `json:"from_status,omitempty"`
+	ToStatus   string          `json:"to_status,omitempty"`
+	OccurredAt time.Time       `json:"occurred_at"`
+	Actor      string          `json:"actor,omitempty"`
+	Payload    json.RawMessage `json:"payload,omitempty"`
 }
 
 func eventToDTO(e domain.ApplicationEvent) eventDTO {
@@ -189,6 +191,10 @@ func eventToDTO(e domain.ApplicationEvent) eventDTO {
 		Type:       string(e.Type),
 		OccurredAt: e.OccurredAt,
 		Actor:      e.Actor,
+		// The note text on a note_added or status_changed event lives only
+		// here: eventToDTO used to drop it, so it was written and then
+		// unreadable through GET /v1/applications/{id}.
+		Payload: json.RawMessage(e.Payload),
 	}
 	if e.FromStatus != nil {
 		dto.FromStatus = string(*e.FromStatus)

@@ -30,6 +30,21 @@ export interface ApplicationEvent extends Omit<WireEvent, 'id' | 'type' | 'occur
 
 export type EventType = NonNullable<WireEvent['type']>
 
+/**
+ * Mirrors api/openapi.yaml's Event.type enum. There is no generated runtime
+ * list to check against (openapi-typescript only emits the type-level
+ * union), so this is hand-kept — the one place mapping.ts's isEventType()
+ * needs to agree with the schema.
+ */
+export const EVENT_TYPES: readonly EventType[] = [
+  'created',
+  'status_changed',
+  'note_added',
+  'contact_logged',
+  'follow_up_sent',
+  'rediscovered',
+]
+
 export type Contact = WireContact
 
 export interface FollowUp extends Application {

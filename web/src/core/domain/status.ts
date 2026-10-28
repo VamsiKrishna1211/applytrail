@@ -46,6 +46,22 @@ export const TERMINAL_STATUSES: readonly Status[] = ['accepted', 'rejected', 'wi
 export const ENGAGED_STATUSES: readonly Status[] = ['applied', 'screening', 'interview', 'offer']
 
 /**
+ * Statuses ListFollowupsDue's WHERE clause admits (internal/db/queries/applications.sql).
+ * Deliberately not the same list as ENGAGED_STATUSES: 'ghosted' can carry a
+ * follow-up date (it is re-enterable — an employer can resurface after
+ * months of silence) even though it is not "engaged" in the IsEngaged sense.
+ * Used to tell a genuinely-empty follow-up queue apart from one that is
+ * empty because the selected status structurally can never appear there.
+ */
+export const FOLLOWUP_ELIGIBLE_STATUSES: readonly Status[] = [
+  'applied',
+  'screening',
+  'interview',
+  'offer',
+  'ghosted',
+]
+
+/**
  * The columns of the board, split the way a person thinks about their pipeline.
  *
  * Between them the two views name every status in `STATUSES`. A status in
@@ -96,5 +112,8 @@ export function canTransition(from: Status, to: Status): boolean {
 
 /** Human label. The wire format is snake_case; nothing but this function should undo that. */
 export function statusLabel(status: Status): string {
-  return status.replace('_', ' ')
+  // replaceAll, not replace: every status today has at most one underscore,
+  // but replace() only fixing the first would silently mangle the day a
+  // two-underscore status (e.g. a hypothetical "follow_up_sent") is added.
+  return status.replaceAll('_', ' ')
 }

@@ -50,6 +50,18 @@ export function ThemeToggle() {
     }
   }, [theme])
 
+  // localStorage is shared across tabs, but the `storage` event that reports
+  // a change fires only in *other* tabs, not the one that wrote it — so
+  // without this, toggling to dark in tab B left tab A on light until it was
+  // reloaded, even though both tabs agree on what is actually stored.
+  useEffect(() => {
+    function onStorage(event: StorageEvent) {
+      if (event.key === KEY || event.key === null) setTheme(read())
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
+
   return (
     <button
       type="button"
