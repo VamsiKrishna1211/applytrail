@@ -122,7 +122,12 @@ curl -s localhost:8080/v1/postings:filter -H "Authorization: Bearer $KEY" \
 
 Optional, and off by default. A single-page client for the pipeline — the
 funnel, the follow-up queue, a board whose moves are the ones the API accepts,
-and an application's event timeline.
+and an application's event timeline. The board carries every status, so what an
+agent discovered is a column you can triage rather than rows only the API can
+see. A search in the top bar finds an application in any status; selecting a
+card shows the posting's link beside the moves available from its status; both
+pages scroll their panels rather than the window; light and dark follow the
+system until you say otherwise.
 
 ```bash
 make web-install     # once

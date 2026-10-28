@@ -20,6 +20,36 @@ claude mcp add --transport http applytrail https://<your-host>/mcp \
   --header "Authorization: Bearer at_live_..."
 ```
 
+### Signing in with Clerk (OAuth)
+
+With [Clerk configured](CONFIGURATION.md#clerk), an MCP client can sign in
+instead of carrying a key. Add the server with no header:
+
+```bash
+claude mcp add --transport http applytrail https://<your-host>/mcp
+```
+
+then run `/mcp` in Claude Code and choose to authenticate. A browser opens on
+Clerk's sign-in page; once you are back, the connection carries a Clerk access
+token. In claude.ai, add the custom connector with only its URL and leave
+**Authentication** on what the form detects.
+
+How a client finds its way, which is what Clerk's `configure_mcp_server`
+expects:
+
+1. An unauthenticated call to `/mcp` gets `401` with
+   `WWW-Authenticate: Bearer resource_metadata="https://<your-host>/.well-known/oauth-protected-resource/mcp"`.
+2. That document names the resource, `https://<your-host>/mcp`, and Clerk as
+   its only authorization server.
+3. The client registers with Clerk through a client ID metadata document and
+   signs the user in with PKCE.
+4. Every token Clerk issues names `https://<your-host>/mcp` as its audience,
+   and the server refuses a token that does not, so a token minted for another
+   server on the same Clerk instance does not work here.
+
+The MCP server URL must be registered on the Clerk instance first, and
+`APPLYTRAIL_PUBLIC_URL` must produce exactly that URL.
+
 ### The claude.ai connector UI
 
 Use this when a **cloud** routine needs the tools. A cloud session runs in
@@ -39,11 +69,12 @@ add a custom connector:
 
 Two things trip people up here.
 
-**Authentication must be set to `None`.** The form pre-selects "Always required
-— Detected", because ApplyTrail answers an unauthenticated request with a
-`WWW-Authenticate` challenge and the client reads that as an OAuth server.
-There is no OAuth server behind it. `None` is the correct choice for a service
-that authenticates with an API key.
+**Authentication must be set to `None`** when you connect with a key. The
+form pre-selects "Always required — Detected", because ApplyTrail answers an
+unauthenticated request with a `WWW-Authenticate` challenge and the client
+reads that as an OAuth server. Without Clerk configured there is no OAuth
+server behind it; with Clerk configured there is, and signing in (above) is
+the better choice.
 
 **`Authorization` is not selectable** in the header list — the client reserves
 it for its own OAuth token. That is why the server accepts `X-Api-Key` as well.

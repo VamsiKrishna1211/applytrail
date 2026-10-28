@@ -1,8 +1,11 @@
 import type { Query, Request, Transport } from '@/core/ports/transport'
 import { ApiError } from './ApiError'
 
-/** Resolves the bearer token at call time, so a re-keyed session needs no rewiring. */
-export type TokenProvider = () => string | undefined
+/**
+ * Resolves the bearer token at call time, so a re-keyed session needs no
+ * rewiring. It may be asynchronous: a Clerk session refreshes its token.
+ */
+export type TokenProvider = () => string | undefined | Promise<string | undefined>
 
 export interface FetchTransportOptions {
   /** API root. Empty string means same-origin, which is what the embedded build serves. */
@@ -39,7 +42,7 @@ export class FetchTransport implements Transport {
   }
 
   async send<T>(request: Request): Promise<T> {
-    const token = this.#token()
+    const token = await this.#token()
     const headers = new Headers({ Accept: 'application/json' })
     if (token) {
       // Authorization wins over X-Api-Key server-side; sending one avoids any

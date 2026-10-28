@@ -212,8 +212,8 @@ func (q *Queries) InsertApplication(ctx context.Context, arg InsertApplicationPa
 const listApplications = `-- name: ListApplications :many
 SELECT a.id, a.tenant_id, a.posting_id, a.status, a.applied_at, a.resume_variant, a.resume_url, a.resume_hash, a.cover_letter_variant, a.next_action_at, a.notes, a.created_at, a.updated_at, p.title, p.canonical_url, p.location_bucket, c.name AS company_name
 FROM applications a
-JOIN postings  p ON p.id = a.posting_id
-JOIN companies c ON c.id = p.company_id
+JOIN postings  p ON p.id = a.posting_id AND p.tenant_id = a.tenant_id
+JOIN companies c ON c.id = p.company_id AND c.tenant_id = a.tenant_id
 WHERE a.tenant_id = $1
   AND ($2::text[] IS NULL
        OR a.status = ANY ($2::text[]))
@@ -260,6 +260,11 @@ type ListApplicationsRow struct {
 
 // Keyset pagination on (created_at, id): stable under concurrent inserts,
 // unlike OFFSET. Filters are optional; a NULL argument disables its clause.
+//
+// Both joins are tenant-pinned, not just the outer WHERE: the schema does not
+// forbid an applications row from referencing another tenant's posting (the
+// unique constraint is on (tenant_id, posting_id), not on posting_id alone),
+// so an unpinned join is a latent cross-tenant read.
 func (q *Queries) ListApplications(ctx context.Context, arg ListApplicationsParams) ([]ListApplicationsRow, error) {
 	rows, err := q.db.Query(ctx, listApplications,
 		arg.TenantID,
@@ -307,15 +312,15 @@ func (q *Queries) ListApplications(ctx context.Context, arg ListApplicationsPara
 }
 
 const listFollowupsDue = `-- name: ListFollowupsDue :many
-SELECT a.id, a.tenant_id, a.posting_id, a.status, a.applied_at, a.resume_variant, a.resume_url, a.resume_hash, a.cover_letter_variant, a.next_action_at, a.notes, a.created_at, a.updated_at, p.title, p.canonical_url, c.name AS company_name
+SELECT a.id, a.tenant_id, a.posting_id, a.status, a.applied_at, a.resume_variant, a.resume_url, a.resume_hash, a.cover_letter_variant, a.next_action_at, a.notes, a.created_at, a.updated_at, p.title, p.canonical_url, p.location_bucket, c.name AS company_name
 FROM applications a
-JOIN postings  p ON p.id = a.posting_id
-JOIN companies c ON c.id = p.company_id
+JOIN postings  p ON p.id = a.posting_id AND p.tenant_id = a.tenant_id
+JOIN companies c ON c.id = p.company_id AND c.tenant_id = a.tenant_id
 WHERE a.tenant_id = $1
   AND a.next_action_at IS NOT NULL
   AND a.next_action_at <= $2
-  AND a.status IN ('applied', 'screening', 'interview', 'offer')
-ORDER BY a.next_action_at
+  AND a.status IN ('applied', 'screening', 'interview', 'offer', 'ghosted')
+ORDER BY a.next_action_at, a.id
 LIMIT $3
 `
 
@@ -341,10 +346,15 @@ type ListFollowupsDueRow struct {
 	UpdatedAt          time.Time
 	Title              string
 	CanonicalUrl       string
+	LocationBucket     string
 	CompanyName        string
 }
 
 // The follow-up queue: engaged applications whose next action is due.
+// 'ghosted' is included even though it is not IsEngaged(): it is explicitly
+// re-enterable (an employer can resurface after months of silence) and
+// UpdateStatus only clears next_action_at on a *terminal* status, so a
+// follow-up date set while ghosted must still be able to surface here.
 func (q *Queries) ListFollowupsDue(ctx context.Context, arg ListFollowupsDueParams) ([]ListFollowupsDueRow, error) {
 	rows, err := q.db.Query(ctx, listFollowupsDue, arg.TenantID, arg.DueBefore, arg.RowLimit)
 	if err != nil {
@@ -370,6 +380,7 @@ func (q *Queries) ListFollowupsDue(ctx context.Context, arg ListFollowupsDuePara
 			&i.UpdatedAt,
 			&i.Title,
 			&i.CanonicalUrl,
+			&i.LocationBucket,
 			&i.CompanyName,
 		); err != nil {
 			return nil, err

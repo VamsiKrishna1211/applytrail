@@ -4,6 +4,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,16 +34,32 @@ type errorDetail struct {
 }
 
 // writeJSON encodes v as the response body with the given status.
+//
+// Encoding happens into a buffer before anything is written to w: every field
+// type here is a plain struct, string, int, or time.Time with no custom
+// MarshalJSON that could fail, so this should never actually hit the error
+// path — but if it ever does (a future field with a marshaller that can
+// error), the caller must not see a 200 with a truncated body just because
+// the status line went out first.
 func writeJSON(w http.ResponseWriter, r *http.Request, status int, v any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
 	if v == nil {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(status)
 		return
 	}
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		// The status line is already sent, so this can only be logged.
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(v); err != nil {
 		slog.ErrorContext(r.Context(), "encode response body", "error", err)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(errorBody{Error: errorDetail{Code: "internal", Message: "internal error"}})
+		return
 	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_, _ = w.Write(buf.Bytes())
 }
 
 // writeError maps a domain error onto an HTTP status and the error envelope.
@@ -56,6 +73,11 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	if status >= http.StatusInternalServerError {
 		slog.ErrorContext(ctx, "request failed", "error", err, "path", r.URL.Path)
 		message = "internal error"
+		if status == http.StatusServiceUnavailable {
+			// Still no detail, but enough for a client to know that retrying
+			// is the right move and its credential is not the problem.
+			message = "temporarily unavailable; retry shortly"
+		}
 	} else {
 		slog.DebugContext(ctx, "request rejected", "error", err, "code", code, "path", r.URL.Path)
 	}
@@ -88,6 +110,8 @@ func statusForError(err error) (int, string) {
 		return http.StatusForbidden, "permission_denied"
 	case errors.Is(err, domain.ErrRateLimited):
 		return http.StatusTooManyRequests, "rate_limited"
+	case errors.Is(err, domain.ErrUnavailable):
+		return http.StatusServiceUnavailable, "unavailable"
 	default:
 		return http.StatusInternalServerError, "internal"
 	}
@@ -96,8 +120,11 @@ func statusForError(err error) (int, string) {
 // decodeJSON reads exactly one JSON value from the request body into dst,
 // rejecting unknown fields so a typo in a client payload surfaces as a 400
 // rather than being silently ignored.
-func decodeJSON(r *http.Request, dst any) error {
-	body := http.MaxBytesReader(nil, r.Body, maxRequestBody)
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
+	// w, not nil: MaxBytesReader marks the response so the server closes the
+	// connection instead of reusing it for keep-alive once the limit is hit,
+	// which it can only do through the real ResponseWriter.
+	body := http.MaxBytesReader(w, r.Body, maxRequestBody)
 	dec := json.NewDecoder(body)
 	dec.DisallowUnknownFields()
 

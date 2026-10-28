@@ -52,3 +52,28 @@ export function dwellLabel(updatedAt: string | undefined, clock: Clock): string 
   if (days === 0) return 'today'
   return `${days}d since last event`
 }
+
+/**
+ * A posting URL, ready to render as a link.
+ *
+ * The URL is free text whoever recorded the application supplied, so it is
+ * parsed rather than trusted: anything that is not http(s) — a `javascript:`
+ * scheme above all — is not offered as a link at all. The label drops the
+ * scheme and a leading `www.` because a bar has room for a host and a path,
+ * not for `https://`.
+ */
+export function postingLink(url: string | undefined): { href: string; label: string } | undefined {
+  if (!url) return undefined
+
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return undefined
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return undefined
+
+  const host = parsed.host.replace(/^www\./, '')
+  const path = parsed.pathname === '/' ? '' : parsed.pathname
+  return { href: parsed.href, label: `${host}${path}` }
+}

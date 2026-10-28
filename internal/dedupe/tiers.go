@@ -94,7 +94,13 @@ func (e *Engine) matchByFingerprint(ctx context.Context, tenantID domain.ID, nor
 		if resolved[i] || n.Company == "" || n.Title == "" {
 			continue
 		}
-		pending[n.Fingerprint] = append(pending[n.Fingerprint], i)
+		// A multi-site candidate ("Manhattan/SF/Philadelphia") is queried
+		// under every site it could be stored as, not just its primary one:
+		// a posting recorded from a single-site sighting of any of them is
+		// still the same job.
+		for _, fp := range n.FingerprintCandidates {
+			pending[fp] = append(pending[fp], i)
+		}
 	}
 	if len(pending) == 0 {
 		return nil
@@ -114,26 +120,51 @@ func (e *Engine) matchByFingerprint(ctx context.Context, tenantID domain.ID, nor
 	return nil
 }
 
-// matchByDescriptionHash is tier 4: identical posting text. It catches the
-// same job cross-posted under a title the earlier tiers could not reconcile.
+// matchByDescriptionHash is tier 4: identical posting text at the same
+// employer. It catches the same job cross-posted under a title the earlier
+// tiers could not reconcile.
+//
+// Scoped to one company, like the fuzzy tier: two different employers
+// reposting the same agency or template boilerplate are not the same job, and
+// content hashing alone cannot tell the difference.
 func (e *Engine) matchByDescriptionHash(ctx context.Context, tenantID domain.ID, normalized []Normalized, results []domain.FilterResult, resolved []bool, policy domain.ResurfacePolicy) error {
 	pending := map[string][]int{}
+	companyNames := map[string][]int{}
 	for i, n := range normalized {
-		if resolved[i] || n.DescriptionHash == "" {
+		if resolved[i] || n.DescriptionHash == "" || n.Company == "" {
 			continue
 		}
 		pending[n.DescriptionHash] = append(pending[n.DescriptionHash], i)
+		companyNames[n.Company] = append(companyNames[n.Company], i)
 	}
 	if len(pending) == 0 {
 		return nil
 	}
 
-	refs, err := e.postings.FindByDescriptionHashes(ctx, tenantID, keysOf(pending))
+	companies, err := e.companies.FindByNormalizedNames(ctx, tenantID, keysOf(companyNames))
+	if err != nil {
+		return err
+	}
+	companyIDs := make([]domain.ID, 0, len(companies))
+	for _, c := range companies {
+		companyIDs = append(companyIDs, c.ID)
+	}
+	if len(companyIDs) == 0 {
+		// None of the candidates' employers have any postings on record.
+		return nil
+	}
+
+	refs, err := e.postings.FindByDescriptionHashes(ctx, tenantID, companyIDs, keysOf(pending))
 	if err != nil {
 		return err
 	}
 	for _, ref := range refs {
 		for _, i := range pending[ref.DescriptionHash] {
+			n := normalized[i]
+			company, known := companies[n.Company]
+			if !known || company.ID != ref.CompanyID {
+				continue
+			}
 			e.record(results, resolved, i, ref, domain.TierContentHash, confidenceContentHash,
 				"identical posting description", policy)
 		}
@@ -191,9 +222,9 @@ func (e *Engine) fuzzyMatchOne(ctx context.Context, tenantID, companyID domain.I
 	best := domain.PostingRef{}
 	bestScore := 0.0
 	for _, ref := range shortlist {
-		// A remote role and an onsite role in another city are not the same
+		// A role in one city and an onsite role in another are not the same
 		// job even when their titles are identical.
-		if !compatibleLocations(n.LocationBucket, ref.LocationBucket) {
+		if !compatibleLocations(n.LocationBucketCandidates, ref.LocationBucket) {
 			continue
 		}
 		score := TitleSimilarity(n.Title, ref.NormalizedTitle)
@@ -239,11 +270,28 @@ func (e *Engine) fuzzyMatchOne(ctx context.Context, tenantID, companyID domain.I
 	return nil
 }
 
-// compatibleLocations reports whether two location buckets could describe the
-// same job. An unknown bucket is treated as compatible with anything, because
-// a missing location is an absence of evidence rather than a difference.
-func compatibleLocations(a, b string) bool {
-	return a == "" || b == "" || a == b
+// compatibleLocations reports whether a candidate's location could describe
+// the same job as an existing posting's stored bucket.
+//
+// An unknown bucket on either side is treated as compatible with anything,
+// because a missing location is an absence of evidence rather than a
+// difference. "remote" is treated as compatible with any specific place too:
+// boards disagree about whether a distributed role "is" remote or "is" the
+// city its team sits in, and in practice that disagreement is about the same
+// job, not two different ones.
+func compatibleLocations(candidateBuckets []string, existing string) bool {
+	if existing == "" || len(candidateBuckets) == 0 {
+		return true
+	}
+	if existing == "remote" {
+		return true
+	}
+	for _, b := range candidateBuckets {
+		if b == "remote" || b == existing {
+			return true
+		}
+	}
+	return false
 }
 
 // record applies the resurfacing policy to a match and writes the result.

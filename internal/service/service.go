@@ -87,7 +87,18 @@ func (s *Service) resolvePolicy(ctx context.Context, st store.Store, tenantID do
 		if err := override.Validate(); err != nil {
 			return domain.ResurfacePolicy{}, "", err
 		}
-		return *override, profileName, nil
+		if profileName == "" {
+			return *override, "", nil
+		}
+		// ProfileApplied must name a profile that actually exists: a caller
+		// combining a typo'd profile name with an override would otherwise
+		// see that name echoed back as if it had been consulted, when in
+		// fact only the override's rules ran.
+		profile, err := st.SearchProfiles().GetByName(ctx, tenantID, profileName)
+		if err != nil {
+			return domain.ResurfacePolicy{}, "", err
+		}
+		return *override, profile.Name, nil
 	}
 	if profileName == "" {
 		return domain.DefaultResurfacePolicy(), "", nil

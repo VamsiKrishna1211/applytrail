@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/VamsiKrishna1211/applytrail/internal/auth"
@@ -31,7 +30,10 @@ type Authenticator struct {
 	touch func(ctx context.Context, id domain.ID, at time.Time)
 }
 
-var _ auth.Authenticator = (*Authenticator)(nil)
+var (
+	_ auth.Authenticator = (*Authenticator)(nil)
+	_ auth.Verifier      = (*Authenticator)(nil)
+)
 
 // New returns an Authenticator backed by keys.
 func New(keys store.APIKeyStore) *Authenticator {
@@ -48,11 +50,17 @@ func (a *Authenticator) WithClock(now func() time.Time) *Authenticator {
 
 // Authenticate resolves the request's credential.
 func (a *Authenticator) Authenticate(ctx context.Context, r *http.Request) (domain.Principal, error) {
-	secret, ok := credentialToken(r)
+	secret, ok := auth.Credential(r)
 	if !ok {
 		return domain.Principal{}, errInvalidCredential
 	}
+	return a.Verify(ctx, secret)
+}
 
+// Verify resolves a raw key, for callers that extracted it already. It makes
+// the Authenticator usable as an auth.Verifier, which is how it serves as the
+// fallback behind auth.Router.
+func (a *Authenticator) Verify(ctx context.Context, secret string) (domain.Principal, error) {
 	prefix, ok := LookupPrefix(secret)
 	if !ok {
 		// Not even shaped like one of ours; no database round trip needed.
@@ -98,50 +106,4 @@ func (a *Authenticator) recordUsage(ctx context.Context, id domain.ID, at time.T
 	if err := a.keys.Touch(detached, id, at); err != nil {
 		slog.WarnContext(ctx, "record api key usage", "error", err, "key_id", id)
 	}
-}
-
-// apiKeyHeader carries the credential when Authorization is unavailable.
-//
-// Some MCP clients reserve Authorization for their own OAuth token and will not
-// let a user set it; claude.ai's custom connector is one. They offer a short
-// list of alternative header names instead, of which this is the most common.
-const apiKeyHeader = "X-Api-Key" //nolint:gosec // a header name, not a credential
-
-// credentialToken extracts the credential from the request.
-//
-// Authorization is the primary channel and is tried first. X-Api-Key is a
-// fallback carrying the bare token with no scheme, for clients that cannot set
-// Authorization. Presenting both is not an error: Authorization wins, so a
-// client that sets one of them cannot be confused by a stale value in the
-// other.
-func credentialToken(r *http.Request) (string, bool) {
-	if token, ok := bearerToken(r); ok {
-		return token, true
-	}
-	token := strings.TrimSpace(r.Header.Get(apiKeyHeader))
-	if token == "" {
-		return "", false
-	}
-	return token, true
-}
-
-// bearerToken extracts the credential from the Authorization header.
-//
-// The scheme match is case-insensitive because clients send "Bearer", "bearer",
-// and occasionally "BEARER", and rejecting those would be a confusing failure
-// for no benefit.
-func bearerToken(r *http.Request) (string, bool) {
-	header := r.Header.Get("Authorization")
-	if header == "" {
-		return "", false
-	}
-	scheme, token, found := strings.Cut(header, " ")
-	if !found || !strings.EqualFold(scheme, "bearer") {
-		return "", false
-	}
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return "", false
-	}
-	return token, true
 }

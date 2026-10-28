@@ -31,7 +31,7 @@ type createProfileRequestDTO struct {
 
 func (h *handlers) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 	var body createProfileRequestDTO
-	if err := decodeJSON(r, &body); err != nil {
+	if err := decodeJSON(w, r, &body); err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -97,7 +97,11 @@ type listProfilesResponseDTO struct {
 }
 
 func (h *handlers) handleListProfiles(w http.ResponseWriter, r *http.Request) {
-	activeOnly := r.URL.Query().Get("active") == "true"
+	activeOnly, err := boolParam("active", r.URL.Query().Get("active"), false)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
 
 	profiles, err := h.svc.ListProfiles(r.Context(), principalOf(r), activeOnly)
 	if err != nil {
@@ -140,7 +144,7 @@ func (h *handlers) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body updateProfileRequestDTO
-	if err := decodeJSON(r, &body); err != nil {
+	if err := decodeJSON(w, r, &body); err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -178,10 +182,11 @@ type searchRunDTO struct {
 	Source  string `json:"source,omitempty"`
 	Query   string `json:"query,omitempty"`
 
-	CandidatesSeen   int `json:"candidates_seen"`
-	NewCount         int `json:"new_count"`
-	DuplicateCount   int `json:"duplicate_count"`
-	NeedsReviewCount int `json:"needs_review_count"`
+	CandidatesSeen     int `json:"candidates_seen"`
+	NewCount           int `json:"new_count"`
+	EligibleAgainCount int `json:"eligible_again_count"`
+	DuplicateCount     int `json:"duplicate_count"`
+	NeedsReviewCount   int `json:"needs_review_count"`
 
 	StartedAt  time.Time  `json:"started_at"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
@@ -190,16 +195,18 @@ type searchRunDTO struct {
 
 func searchRunToDTO(run domain.SearchRun) searchRunDTO {
 	return searchRunDTO{
-		ID:               run.ID.String(),
-		Source:           string(run.Source),
-		Query:            run.Query,
-		CandidatesSeen:   run.CandidatesSeen,
-		NewCount:         run.NewCount,
-		DuplicateCount:   run.DuplicateCount,
-		NeedsReviewCount: run.NeedsReviewCount,
-		StartedAt:        run.StartedAt,
-		FinishedAt:       run.FinishedAt,
-		Notes:            run.Notes,
+		ID:                 run.ID.String(),
+		Profile:            run.ProfileName,
+		Source:             string(run.Source),
+		Query:              run.Query,
+		CandidatesSeen:     run.CandidatesSeen,
+		NewCount:           run.NewCount,
+		EligibleAgainCount: run.EligibleAgainCount,
+		DuplicateCount:     run.DuplicateCount,
+		NeedsReviewCount:   run.NeedsReviewCount,
+		StartedAt:          run.StartedAt,
+		FinishedAt:         run.FinishedAt,
+		Notes:              run.Notes,
 	}
 }
 
@@ -212,7 +219,7 @@ type startRunRequestDTO struct {
 
 func (h *handlers) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	var body startRunRequestDTO
-	if err := decodeJSON(r, &body); err != nil {
+	if err := decodeJSON(w, r, &body); err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -237,7 +244,7 @@ func (h *handlers) handleFinishRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body finishRunRequestDTO
-	if err := decodeJSON(r, &body); err != nil {
+	if err := decodeJSON(w, r, &body); err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -255,7 +262,12 @@ type listRunsResponseDTO struct {
 }
 
 func (h *handlers) handleListRuns(w http.ResponseWriter, r *http.Request) {
-	filter := store.SearchRunFilter{Limit: intParam(r.URL.Query().Get("limit"), 25)}
+	limit, err := intParam("limit", r.URL.Query().Get("limit"), 25, maxLimit)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	filter := store.SearchRunFilter{Limit: limit}
 	if raw := r.URL.Query().Get("since"); raw != "" {
 		since, err := time.Parse(time.RFC3339, raw)
 		if err != nil {

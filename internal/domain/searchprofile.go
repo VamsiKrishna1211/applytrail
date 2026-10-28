@@ -67,13 +67,18 @@ type SearchRun struct {
 	ID        ID
 	TenantID  ID
 	ProfileID *ID
+	// ProfileName is the profile's name, filled in by the service layer from
+	// ProfileID for display; "" when the run used the built-in defaults or
+	// its profile has since been deleted. The store itself never sets this.
+	ProfileName string
 
-	Source           Source
-	Query            string
-	CandidatesSeen   int
-	NewCount         int
-	DuplicateCount   int
-	NeedsReviewCount int
+	Source             Source
+	Query              string
+	CandidatesSeen     int
+	NewCount           int
+	EligibleAgainCount int
+	DuplicateCount     int
+	NeedsReviewCount   int
 
 	StartedAt  time.Time
 	FinishedAt *time.Time

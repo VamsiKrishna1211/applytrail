@@ -10,7 +10,17 @@ html {
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  /* iteration-count: 1, not just a near-zero duration: an `infinite` animation
+     (the loading skeleton's shimmer, Feedback.module.css) with a duration this
+     short does not read as "stopped" — it is a style-recalc hot loop running
+     as fast as the browser can manage, the opposite of what reduced motion
+     asks for. Capping the iteration count is what actually stops it, after
+     the one (now instant) frame. */
+  * {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
 }
 
 body {
@@ -35,9 +45,11 @@ button:disabled { cursor: not-allowed; }
 h1, h2, h3 { line-height: 1.25; letter-spacing: -.018em; text-wrap: balance; margin: 0; }
 p { margin: 0; }
 
-/* Two globals, because they are typographic facts rather than component
- * styles: the numeric face, and the small uppercase label the docs site uses
- * to separate a section from its content. */
+/* Three globals, because they are facts about the app rather than styles that
+ * belong to one component: the numeric face, the small uppercase label the
+ * docs site uses to separate a section from its content, and what a scrolling
+ * region looks like. Every page that scrolls a part of itself rather than the
+ * whole document reaches for the last one, so it is defined once. */
 .mono {
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
@@ -54,4 +66,20 @@ p { margin: 0; }
 .sr-only {
   position: absolute; width: 1px; height: 1px; overflow: hidden;
   clip-path: inset(50%); white-space: nowrap;
+}
+
+.scrolls {
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+}
+
+.scrolls::-webkit-scrollbar { width: 8px; }
+
+.scrolls::-webkit-scrollbar-thumb {
+  background: var(--line-2);
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background-clip: content-box;
 }

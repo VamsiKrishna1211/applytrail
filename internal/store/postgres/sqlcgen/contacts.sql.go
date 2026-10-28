@@ -41,18 +41,22 @@ func (q *Queries) GetContact(ctx context.Context, arg GetContactParams) (Contact
 }
 
 const linkContactToApplication = `-- name: LinkContactToApplication :exec
-INSERT INTO application_contacts (application_id, contact_id)
-VALUES ($1, $2)
+INSERT INTO application_contacts (tenant_id, application_id, contact_id)
+VALUES ($1, $2, $3)
 ON CONFLICT DO NOTHING
 `
 
 type LinkContactToApplicationParams struct {
+	TenantID      uuid.UUID
 	ApplicationID uuid.UUID
 	ContactID     uuid.UUID
 }
 
+// tenant_id is carried on the link row itself (migration 00005), not just
+// reachable through a join: nothing about (application_id, contact_id) alone
+// prevents linking across tenants, since the table has no other tenant guard.
 func (q *Queries) LinkContactToApplication(ctx context.Context, arg LinkContactToApplicationParams) error {
-	_, err := q.db.Exec(ctx, linkContactToApplication, arg.ApplicationID, arg.ContactID)
+	_, err := q.db.Exec(ctx, linkContactToApplication, arg.TenantID, arg.ApplicationID, arg.ContactID)
 	return err
 }
 
@@ -60,7 +64,7 @@ const listContacts = `-- name: ListContacts :many
 SELECT id, tenant_id, company_id, name, role, email, linkedin_url, notes, last_contact_at, created_at, updated_at FROM contacts
 WHERE tenant_id = $1
   AND ($2::uuid IS NULL OR company_id = $2::uuid)
-ORDER BY updated_at DESC
+ORDER BY updated_at DESC, id DESC
 LIMIT $3
 `
 
@@ -104,9 +108,9 @@ func (q *Queries) ListContacts(ctx context.Context, arg ListContactsParams) ([]C
 
 const listContactsForApplication = `-- name: ListContactsForApplication :many
 SELECT c.id, c.tenant_id, c.company_id, c.name, c.role, c.email, c.linkedin_url, c.notes, c.last_contact_at, c.created_at, c.updated_at FROM contacts c
-JOIN application_contacts ac ON ac.contact_id = c.id
+JOIN application_contacts ac ON ac.contact_id = c.id AND ac.tenant_id = c.tenant_id
 WHERE ac.application_id = $1 AND c.tenant_id = $2
-ORDER BY c.updated_at DESC
+ORDER BY c.updated_at DESC, c.id DESC
 `
 
 type ListContactsForApplicationParams struct {

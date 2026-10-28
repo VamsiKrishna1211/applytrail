@@ -2,8 +2,19 @@
  *
  * Colour, type and spacing are lifted verbatim from docs/assets/css/docs.css,
  * so the app and the documentation site are the same product. As there, the
- * dark block redefines only tokens: nothing below this file needs to know
+ * dark blocks redefine only tokens: nothing below this file needs to know
  * which scheme is active.
+ *
+ * Scheme is decided in three steps, in this order:
+ *
+ *   :root                                    the light palette, always defined
+ *   @media (prefers-color-scheme: dark)      the system's answer, unless the
+ *     :root:not([data-theme='light'])        reader has explicitly said light
+ *   :root[data-theme='dark']                 the reader's explicit answer
+ *
+ * `data-theme` is absent until someone picks a side, so "follow the system"
+ * stays the default and needs no attribute. THE TWO DARK BLOCKS MUST STAY
+ * IDENTICAL: one answers the system, the other answers the toggle.
  */
 
 :root {
@@ -37,6 +48,8 @@
   --gutter:   2rem;
   --page-max: 1280px;
 
+  color-scheme: light dark;
+
   --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
           "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
@@ -44,7 +57,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --paper:      #0d1211;
     --surface:    #121918;
     --sunk:       #171f1d;
@@ -71,4 +84,39 @@
     --shadow-sm:  0 1px 2px rgba(0, 0, 0, .4);
     --shadow-lg:  -24px 0 48px -32px rgba(0, 0, 0, .8);
   }
+}
+
+/* Native widgets — scrollbars, form controls, the canvas behind the page —
+ * follow `color-scheme`, not our tokens, so an override has to say which
+ * scheme it means or a light page keeps dark scrollbars. */
+:root[data-theme='light'] { color-scheme: light; }
+
+/* The toggle's answer. Identical to the block above; see the header. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --paper:      #0d1211;
+  --surface:    #121918;
+  --sunk:       #171f1d;
+  --ink:        #e5ebe8;
+  --ink-2:      #bcc7c3;
+  --muted:      #8b9a95;
+  --line:       #212b28;
+  --line-2:     #2d3a36;
+  --accent:     #5ed6c5;
+  --accent-2:   #8ae9dc;
+  --accent-soft:#102f2b;
+  --accent-line:#1c4a44;
+  --ok:         #5fce97;
+  --ok-soft:    #10281d;
+  --ok-line:    #1d4433;
+  --warn:       #dfae62;
+  --warn-soft:  #2a2213;
+  --warn-line:  #4a3c1f;
+  --stop:       #f0857b;
+  --stop-soft:  #2d1815;
+  --stop-line:  #4d2823;
+  --code-bg:    #0f1615;
+  --shadow:     0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -16px rgba(0, 0, 0, .8);
+  --shadow-sm:  0 1px 2px rgba(0, 0, 0, .4);
+  --shadow-lg:  -24px 0 48px -32px rgba(0, 0, 0, .8);
 }

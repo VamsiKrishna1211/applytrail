@@ -26,8 +26,30 @@ func TestExtractIdentity(t *testing.T) {
 			source: domain.SourceGreenhouse, id: "4012345", company: "acme",
 		},
 		{
+			// The entire point of gh_jid is a Greenhouse board embedded on
+			// the employer's own domain, so this must resolve host-independently.
 			name: "greenhouse embedded on a company site", url: "https://acme.com/careers?gh_jid=4012345",
-			source: domain.SourceUnknown, id: "",
+			source: domain.SourceGreenhouse, id: "4012345",
+		},
+		{
+			name:   "greenhouse embedded via careers subdomain, real production URL",
+			url:    "https://careers.withwaymo.com/jobs?gh_jid=7991190",
+			source: domain.SourceGreenhouse, id: "7991190",
+		},
+		{
+			name:   "workday requisition id with no location segment",
+			url:    "https://blueorigin.wd5.myworkdayjobs.com/en-US/BlueOrigin/job/Autonomous-Vehicle-AI-Engineer---Computer-Vision-and-Path-Planning_R62257",
+			source: domain.SourceWorkday, id: "R62257",
+		},
+		{
+			name:   "workday requisition id with no location segment, second real production URL",
+			url:    "https://bostondynamics.wd1.myworkdayjobs.com/en-US/Boston_Dynamics/job/Robotics-Engineer--Stretch-Perception_R2537",
+			source: domain.SourceWorkday, id: "R2537",
+		},
+		{
+			name:   "linkedin slug containing an earlier number is not mistaken for the id",
+			url:    "https://www.linkedin.com/jobs/view/engineer-123456-at-acme-4012345",
+			source: domain.SourceLinkedIn, id: "4012345",
 		},
 		{
 			name: "lever", url: "https://jobs.lever.co/acme/1a2b3c4d-5e6f-4a8b-9c0d-1e2f3a4b5c6d",
@@ -114,8 +136,26 @@ func TestIdentityKey_QualifiesByEmployer(t *testing.T) {
 	assert.Equal(t, acme.ExternalID, globex.ExternalID, "the bare requisition ids are identical")
 	assert.NotEqual(t, acme.Key(), globex.Key(),
 		"so comparing bare ids would report two unrelated jobs as the same one")
-	assert.Equal(t, "acme/R-12345", acme.Key())
-	assert.Equal(t, "globex/R-12345", globex.Key())
+	assert.Equal(t, "acme/r-12345", acme.Key())
+	assert.Equal(t, "globex/r-12345", globex.Key())
+}
+
+// A board's rendering of a requisition ID's case is not semantically
+// meaningful, so two sightings that differ only in case must still resolve
+// to one identity.
+func TestIdentityKey_IsCaseInsensitiveInTheExternalID(t *testing.T) {
+	upper := dedupe.ExtractIdentity("https://acme.wd1.myworkdayjobs.com/en-US/careers/job/Austin/Senior-Engineer_R-12345")
+	lower := dedupe.ExtractIdentity("https://acme.wd1.myworkdayjobs.com/en-US/careers/job/Austin/Senior-Engineer_r-12345")
+	assert.Equal(t, upper.Key(), lower.Key())
+}
+
+// A failed extraction must not be written to storage as if it were a real
+// identity: it is the reason a truncated id like "blueorigin/" ended up in
+// production, where it then collided with the next equally-failed extraction.
+func TestIdentityKey_EmptyWhenNoIDWasExtracted(t *testing.T) {
+	identity := dedupe.ExtractIdentity("https://blueorigin.wd5.myworkdayjobs.com/en-US/BlueOrigin/careers")
+	assert.False(t, identity.Found())
+	assert.Equal(t, "", identity.Key(), "a company slug alone is not an identity")
 }
 
 func TestIdentityKey_FallsBackToBareIDWhenNoEmployerInURL(t *testing.T) {

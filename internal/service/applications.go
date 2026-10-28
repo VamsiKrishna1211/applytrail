@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/VamsiKrishna1211/applytrail/internal/dedupe"
 	"github.com/VamsiKrishna1211/applytrail/internal/domain"
 	"github.com/VamsiKrishna1211/applytrail/internal/store"
 )
@@ -64,6 +65,12 @@ func (s *Service) RecordApplication(ctx context.Context, p domain.Principal, req
 			return err
 		}
 
+		// The real prior status, captured before any transition — not
+		// assumed to be "discovered". A posting can reach "applied" from
+		// "queued" or "screened_out" too, and the timeline must say which.
+		from := application.Status
+		transitioned := false
+
 		if application.Status != domain.StatusApplied {
 			if err := domain.ValidateTransition(application.Status, domain.StatusApplied); err != nil {
 				return err
@@ -77,29 +84,53 @@ func (s *Service) RecordApplication(ctx context.Context, p domain.Principal, req
 			if err != nil {
 				return err
 			}
+			transitioned = true
+		} else if req.AppliedAt != nil || req.FollowUpInDays > 0 {
+			// Already applied, but the caller explicitly supplied a date or a
+			// follow-up window (as opposed to a bare retry that happens to
+			// recompute the same default) — that intent must not be silently
+			// dropped by skipping this branch entirely, the way it used to be.
+			application, err = tx.Applications().Update(ctx, p.TenantID, application.ID, store.ApplicationUpdate{
+				NextActionAt: &nextAction,
+			})
+			if err != nil {
+				return err
+			}
 		}
 
-		application, err = tx.Applications().Update(ctx, p.TenantID, application.ID, store.ApplicationUpdate{
+		update := store.ApplicationUpdate{
 			ResumeVariant:      optional(req.ResumeVariant),
 			ResumeURL:          optional(req.ResumeURL),
 			ResumeHash:         optional(req.ResumeHash),
 			CoverLetterVariant: optional(req.CoverLetterVariant),
-			Notes:              optional(req.Notes),
-		})
+		}
+		if req.Notes != "" {
+			// Appended, like every other note-writing path (AddNote,
+			// UpdateStatus): overwriting here would let a second
+			// record_application call for the same posting destroy notes an
+			// earlier call recorded.
+			update.Notes = optional(appendNote(application.Notes, appliedAt, req.Notes))
+		}
+		application, err = tx.Applications().Update(ctx, p.TenantID, application.ID, update)
 		if err != nil {
 			return err
 		}
 
-		from := domain.StatusDiscovered
-		applied := domain.StatusApplied
-		if err := s.appendEvent(ctx, tx, p, application.ID, domain.ApplicationEvent{
-			Type:       domain.EventStatusChanged,
-			FromStatus: &from,
-			ToStatus:   &applied,
-			OccurredAt: appliedAt,
-			Payload:    jsonPayload(map[string]any{"resume_variant": req.ResumeVariant}),
-		}); err != nil {
-			return err
+		// Only a real transition belongs on the timeline. Recording another
+		// "→ applied" event on a call that made no transition would fabricate
+		// history and, on a retried request, duplicate the one event that
+		// already describes what happened.
+		if transitioned {
+			applied := domain.StatusApplied
+			if err := s.appendEvent(ctx, tx, p, application.ID, domain.ApplicationEvent{
+				Type:       domain.EventStatusChanged,
+				FromStatus: &from,
+				ToStatus:   &applied,
+				OccurredAt: appliedAt,
+				Payload:    jsonPayload(map[string]any{"resume_variant": req.ResumeVariant}),
+			}); err != nil {
+				return err
+			}
 		}
 
 		result = application
@@ -124,8 +155,18 @@ func (s *Service) resolvePosting(ctx context.Context, tx store.Store, p domain.P
 	if err != nil {
 		return domain.ID{}, fmt.Errorf("match inline posting: %w", err)
 	}
-	if verdicts[0].PostingID != nil {
-		return *verdicts[0].PostingID, nil
+	if len(verdicts) != 1 {
+		return domain.ID{}, fmt.Errorf("match inline posting: expected 1 result, got %d", len(verdicts))
+	}
+	// needs_review carries a PostingID too — it is the engine's best guess,
+	// offered so a caller can adjudicate, not a match it is confident enough
+	// to reuse on its own. Attaching the application to it here would be
+	// exactly the guess IngestPostings refuses to make for the same verdict.
+	switch verdicts[0].Verdict {
+	case domain.VerdictDuplicate, domain.VerdictEligibleAgain:
+		if verdicts[0].PostingID != nil {
+			return *verdicts[0].PostingID, nil
+		}
 	}
 
 	posting, _, err := s.createPosting(ctx, tx, p, *req.Candidate, s.now())
@@ -152,6 +193,14 @@ type UpdateStatusRequest struct {
 func (s *Service) UpdateStatus(ctx context.Context, p domain.Principal, req UpdateStatusRequest) (domain.Application, error) {
 	if err := p.RequireScope(domain.ScopeWrite); err != nil {
 		return domain.Application{}, err
+	}
+	if req.ClearNextAction && req.NextActionAt != nil {
+		// The store's CASE expression would silently let clear win, dropping
+		// the caller's explicit date with no error. A caller that asked for
+		// both meant something specific by at least one of them, so make it
+		// say which rather than guessing.
+		return domain.Application{}, domain.NewValidationError(
+			"next_action_at and clear_next_action are contradictory; set at most one")
 	}
 
 	occurredAt := s.now()
@@ -265,6 +314,13 @@ func (s *Service) ListApplications(ctx context.Context, p domain.Principal, filt
 			return nil, domain.NewValidationError(fmt.Sprintf("status %q is not recognised", status))
 		}
 	}
+	// Normalized once, here, rather than by each transport: the column this
+	// is compared against is c.normalized_name, so "Acme, Inc." would
+	// otherwise silently match nothing while only "acme" worked — and REST
+	// and MCP would each have to remember that themselves.
+	if filter.CompanyNormalizedName != "" {
+		filter.CompanyNormalizedName = dedupe.NormalizeCompany(filter.CompanyNormalizedName)
+	}
 	return s.store.Applications().List(ctx, p.TenantID, filter)
 }
 
@@ -277,43 +333,57 @@ type ApplicationDetail struct {
 }
 
 // GetApplication returns everything known about one application.
+//
+// The five reads run inside one transaction rather than as independent round
+// trips: without that, a status change landing between two of them could hand
+// back an application and a timeline whose last event does not match the
+// status shown. Postgres's default READ COMMITTED still lets a *later*
+// statement in this transaction see a commit that happened after it started,
+// so this narrows the window rather than closing it outright — closing it
+// fully would need REPEATABLE READ, which store.Store does not currently
+// expose a way to request.
 func (s *Service) GetApplication(ctx context.Context, p domain.Principal, id domain.ID, eventLimit int) (ApplicationDetail, error) {
 	if err := p.RequireScope(domain.ScopeRead); err != nil {
 		return ApplicationDetail{}, err
 	}
 
-	application, err := s.store.Applications().Get(ctx, p.TenantID, id)
-	if err != nil {
-		return ApplicationDetail{}, err
-	}
-	posting, err := s.store.Postings().Get(ctx, p.TenantID, application.PostingID)
-	if err != nil {
-		return ApplicationDetail{}, err
-	}
-	company, err := s.store.Companies().Get(ctx, p.TenantID, posting.CompanyID)
-	if err != nil {
-		return ApplicationDetail{}, err
-	}
-	events, err := s.store.Events().List(ctx, p.TenantID, id, eventLimit)
-	if err != nil {
-		return ApplicationDetail{}, err
-	}
-	contacts, err := s.store.Contacts().ListForApplication(ctx, p.TenantID, id)
-	if err != nil {
-		return ApplicationDetail{}, err
-	}
+	var detail ApplicationDetail
+	err := s.store.Tx(ctx, func(ctx context.Context, tx store.Store) error {
+		application, err := tx.Applications().Get(ctx, p.TenantID, id)
+		if err != nil {
+			return err
+		}
+		posting, err := tx.Postings().Get(ctx, p.TenantID, application.PostingID)
+		if err != nil {
+			return err
+		}
+		company, err := tx.Companies().Get(ctx, p.TenantID, posting.CompanyID)
+		if err != nil {
+			return err
+		}
+		events, err := tx.Events().List(ctx, p.TenantID, id, eventLimit)
+		if err != nil {
+			return err
+		}
+		contacts, err := tx.Contacts().ListForApplication(ctx, p.TenantID, id)
+		if err != nil {
+			return err
+		}
 
-	return ApplicationDetail{
-		Application: store.ApplicationWithPosting{
-			Application:    application,
-			PostingTitle:   posting.Title,
-			PostingURL:     posting.CanonicalURL,
-			LocationBucket: posting.LocationBucket,
-			CompanyName:    company.Name,
-		},
-		Events:   events,
-		Contacts: contacts,
-	}, nil
+		detail = ApplicationDetail{
+			Application: store.ApplicationWithPosting{
+				Application:    application,
+				PostingTitle:   posting.Title,
+				PostingURL:     posting.CanonicalURL,
+				LocationBucket: posting.LocationBucket,
+				CompanyName:    company.Name,
+			},
+			Events:   events,
+			Contacts: contacts,
+		}
+		return nil
+	})
+	return detail, err
 }
 
 // FollowUp is an application that has gone quiet for long enough to act on.

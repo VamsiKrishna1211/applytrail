@@ -136,6 +136,33 @@ func TestBucketLocation(t *testing.T) {
 	}
 }
 
+func TestBucketLocationCandidates(t *testing.T) {
+	tests := []struct {
+		in   string
+		want []string
+		why  string
+	}{
+		{in: "Not specified", want: nil, why: "a placeholder is an absence of information, not a place"},
+		{in: "Not stated", want: nil},
+		{in: "N/A", want: nil},
+		{in: "TBD", want: nil},
+		{in: "San Francisco (relocation required)", want: []string{"san francisco"},
+			why: "a parenthetical aside is not part of the place, same as in a title"},
+		{in: "Manhattan/SF/Philadelphia", want: []string{"manhattan", "sf", "philadelphia"},
+			why: "slash-separated sites are independent candidates, in order, primary first"},
+		{in: "San Francisco, CA / Sunnyvale, CA", want: []string{"san francisco", "sunnyvale"},
+			why: "comma is a hierarchy within one site; slash separates sites"},
+		{in: "Austin, TX, United States", want: []string{"austin"},
+			why: "unchanged from BucketLocation: only the first comma component is the place"},
+		{in: "", want: nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			assert.Equal(t, tc.want, dedupe.BucketLocationCandidates(tc.in), tc.why)
+		})
+	}
+}
+
 func TestFingerprintAndDescriptionHash(t *testing.T) {
 	linkedIn := dedupe.Fingerprint(
 		dedupe.NormalizeCompany("Acme, Inc."),

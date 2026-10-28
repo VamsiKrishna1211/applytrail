@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type CSSProperties } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useServices } from '@/app/ServicesProvider'
 import {
@@ -7,6 +7,7 @@ import {
   type Status,
 } from '@/core/domain/status'
 import { buildBoard } from '@/core/usecases/buildBoard'
+import { searchApplications } from '@/core/usecases/searchApplications'
 import { Board } from '@/ui/components/Board'
 import { ErrorNotice, Skeleton } from '@/ui/components/Feedback'
 import { MoveBar } from '@/ui/components/MoveBar'
@@ -25,22 +26,61 @@ const VIEWS: Record<View, { label: string; statuses: readonly Status[] }> = {
 /** One page of cards. Large enough that most boards arrive whole, bounded so none arrives forever. */
 const PAGE_SIZE = 100
 
+/** The intake column, which is paged separately — see the comment in the component. */
+const INTAKE: Status = 'discovered'
+const INTAKE_QUERY = { status: [INTAKE], limit: PAGE_SIZE }
+
 export function PipelinePage() {
   const { clock } = useServices()
-  const [, setSearchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [view, setView] = useState<View>('active')
+  const [filter, setFilter] = useState('')
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
 
   const statuses = VIEWS[view].statuses
-  const query = useMemo(() => ({ status: statuses, limit: PAGE_SIZE }), [statuses])
+
+  // `discovered` is fetched on its own rather than with the rest of the view.
+  // The API pages one list ordered by creation, newest first, and a run of
+  // record_discoveries writes a burst of new rows — so a shared page of 100
+  // would be all intake and none of the columns you were actually working in.
+  // Two queries mean a busy intake cannot starve the board beside it.
+  const boardStatuses = useMemo(
+    () => statuses.filter((status) => status !== INTAKE),
+    [statuses],
+  )
+  const intakeShown = statuses.includes(INTAKE)
+
+  const query = useMemo(() => ({ status: boardStatuses, limit: PAGE_SIZE }), [boardStatuses])
   const list = useApplications(query)
+  const intake = useApplications(INTAKE_QUERY, intakeShown)
   const updateStatus = useUpdateStatus()
 
-  const columns = useMemo(
-    () => buildBoard(list.applications, statuses),
-    [list.applications, statuses],
+  // The same matcher the top-bar search uses, over the cards already on the
+  // board: this narrows what is in front of you, where that one finds an
+  // application in any status anywhere in the pipeline.
+  const shown = useMemo(
+    () => searchApplications([...list.applications, ...intake.applications], filter),
+    [list.applications, intake.applications, filter],
   )
-  const selected = list.applications.find((application) => application.id === selectedId)
+
+  // Two lists, one board: either can still have pages left, and the head says
+  // so once for both rather than growing a second control.
+  const loaded = list.applications.length + intake.applications.length
+  const hasMore = list.hasNextPage || (intakeShown && intake.hasNextPage)
+  const fetchingMore = list.isFetchingNextPage || intake.isFetchingNextPage
+  const pending = list.isPending || (intakeShown && intake.isPending)
+  const error = list.error ?? (intakeShown ? intake.error : null)
+
+  function loadMore() {
+    if (list.hasNextPage) void list.fetchNextPage()
+    if (intakeShown && intake.hasNextPage) void intake.fetchNextPage()
+  }
+
+  const columns = useMemo(() => buildBoard(shown, statuses), [shown, statuses])
+
+  // Selection is read out of the filtered set, so a card the filter hides
+  // takes the move bar with it and gets it back when the filter is cleared.
+  const selected = shown.find((application) => application.id === selectedId)
 
   function switchView(next: View) {
     setView(next)
@@ -63,15 +103,13 @@ export function PipelinePage() {
     )
   }
 
+  // A frame, not a document: the head and the move bar are fixed rows and the
+  // board between them takes whatever height is left. Nothing here scrolls —
+  // the columns do, one at a time.
   return (
-    <>
+    <div className={styles.page}>
       <div className={styles.head}>
-        <div>
-          <h1 className={styles.title}>Pipeline</h1>
-          <p className={styles.lede}>
-            Selecting a card offers only the moves the API will accept from its status.
-          </p>
-        </div>
+        <h1 className={styles.title}>Pipeline</h1>
 
         <div className={styles.segmented} role="group" aria-label="Which part of the pipeline">
           {(Object.keys(VIEWS) as View[]).map((key) => (
@@ -86,17 +124,67 @@ export function PipelinePage() {
             </button>
           ))}
         </div>
+
+        <div className={styles.filter}>
+          <input
+            type="search"
+            className={styles.filterInput}
+            value={filter}
+            placeholder="Filter this board"
+            aria-label="Filter the cards on this board"
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(event) => setFilter(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') setFilter('')
+            }}
+          />
+          {filter ? (
+            <button
+              type="button"
+              className={styles.filterClear}
+              aria-label="Clear the filter"
+              onClick={() => setFilter('')}
+            >
+              ×
+            </button>
+          ) : null}
+        </div>
+
+        {/* What the filter is hiding, said plainly — a board with columns of
+            zero otherwise looks like a board with nothing on it. */}
+        {filter ? (
+          <span className={styles.filterCount}>
+            {shown.length} of {loaded}
+          </span>
+        ) : null}
+
+        {/* Paging belongs beside the count, not under a board that now ends
+            with the window. */}
+        {hasMore ? (
+          <div className={styles.more}>
+            <span className={styles.moreNote}>
+              Showing {loaded}; the board is not complete until this is empty.
+            </span>
+            <button
+              type="button"
+              className={styles.moreButton}
+              disabled={fetchingMore}
+              onClick={loadMore}
+            >
+              {fetchingMore ? 'Loading…' : 'Load more'}
+            </button>
+          </div>
+        ) : null}
       </div>
 
-      {list.isError ? <ErrorNotice error={list.error} what="load the board" /> : null}
+      {error ? <ErrorNotice error={error} what="load the board" /> : null}
 
-      {list.isPending ? (
-        <div className={styles.loading}>
-          <Skeleton height={220} />
-          <Skeleton height={220} />
-          <Skeleton height={220} />
-          <Skeleton height={220} />
-          <Skeleton height={220} />
+      {pending ? (
+        <div className={styles.loading} style={{ '--columns': statuses.length } as CSSProperties}>
+          {statuses.map((status) => (
+            <Skeleton key={status} height={220} />
+          ))}
         </div>
       ) : (
         <Board
@@ -106,22 +194,6 @@ export function PipelinePage() {
           daysIn={(application) => dwellLabel(application.updated_at, clock)}
         />
       )}
-
-      {list.hasNextPage ? (
-        <div className={styles.more}>
-          <button
-            type="button"
-            className={styles.moreButton}
-            disabled={list.isFetchingNextPage}
-            onClick={() => void list.fetchNextPage()}
-          >
-            {list.isFetchingNextPage ? 'Loading…' : 'Load more'}
-          </button>
-          <span className={styles.moreNote}>
-            Showing {list.applications.length}; the board is not complete until this is empty.
-          </span>
-        </div>
-      ) : null}
 
       <div className={styles.bar}>
         <MoveBar
@@ -133,9 +205,18 @@ export function PipelinePage() {
             setSelectedId(undefined)
             updateStatus.reset()
           }}
-          onOpen={() => selectedId && setSearchParams({ app: selectedId })}
+          onOpen={() => {
+            // Cloned, like GlobalSearch and AppShell's own close handler:
+            // passing a bare object replaces the whole query string, silently
+            // dropping any other param (there are none here today, but the
+            // three call sites disagreeing about this is the actual bug).
+            if (!selectedId) return
+            const next = new URLSearchParams(searchParams)
+            next.set('app', selectedId)
+            setSearchParams(next)
+          }}
         />
       </div>
-    </>
+    </div>
   )
 }

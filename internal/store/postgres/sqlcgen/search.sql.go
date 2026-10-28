@@ -13,6 +13,27 @@ import (
 	"github.com/google/uuid"
 )
 
+const countSearchRunsSince = `-- name: CountSearchRunsSince :one
+SELECT count(*) FROM search_runs
+WHERE tenant_id = $1 AND profile_id = $2 AND started_at >= $3
+`
+
+type CountSearchRunsSinceParams struct {
+	TenantID  uuid.UUID
+	ProfileID *uuid.UUID
+	Since     time.Time
+}
+
+// The true count, not a length-of-a-capped-list stand-in: ProfileView.RunsToday
+// used to be len(List(..., Limit: 100)), which silently read as "100" for
+// any profile with more than 100 runs in a day.
+func (q *Queries) CountSearchRunsSince(ctx context.Context, arg CountSearchRunsSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countSearchRunsSince, arg.TenantID, arg.ProfileID, arg.Since)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createSearchProfile = `-- name: CreateSearchProfile :one
 INSERT INTO search_profiles (
     tenant_id, name, description, active, keywords, titles, locations,
@@ -89,7 +110,7 @@ func (q *Queries) CreateSearchProfile(ctx context.Context, arg CreateSearchProfi
 const createSearchRun = `-- name: CreateSearchRun :one
 INSERT INTO search_runs (tenant_id, profile_id, source, query, notes)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, tenant_id, profile_id, source, query, candidates_seen, new_count, duplicate_count, needs_review_count, started_at, finished_at, notes
+RETURNING id, tenant_id, profile_id, source, query, candidates_seen, new_count, duplicate_count, needs_review_count, started_at, finished_at, notes, eligible_again_count
 `
 
 type CreateSearchRunParams struct {
@@ -122,6 +143,7 @@ func (q *Queries) CreateSearchRun(ctx context.Context, arg CreateSearchRunParams
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.Notes,
+		&i.EligibleAgainCount,
 	)
 	return i, err
 }
@@ -129,9 +151,13 @@ func (q *Queries) CreateSearchRun(ctx context.Context, arg CreateSearchRunParams
 const finishSearchRun = `-- name: FinishSearchRun :one
 UPDATE search_runs
 SET finished_at = COALESCE(finished_at, $1),
-    notes       = CASE WHEN $2::text <> '' THEN $2 ELSE notes END
+    notes       = CASE
+                     WHEN $2::text = '' THEN notes
+                     WHEN notes = '' THEN $2
+                     ELSE notes || E'\n' || $2
+                   END
 WHERE id = $3 AND tenant_id = $4
-RETURNING id, tenant_id, profile_id, source, query, candidates_seen, new_count, duplicate_count, needs_review_count, started_at, finished_at, notes
+RETURNING id, tenant_id, profile_id, source, query, candidates_seen, new_count, duplicate_count, needs_review_count, started_at, finished_at, notes, eligible_again_count
 `
 
 type FinishSearchRunParams struct {
@@ -141,6 +167,11 @@ type FinishSearchRunParams struct {
 	TenantID   uuid.UUID
 }
 
+// Notes accumulate rather than overwrite, matching every other note field in
+// the schema (application notes, contact notes): a second call appends
+// instead of destroying what an earlier call recorded. finished_at is set
+// once and never moved, so a repeat call is a safe, idempotent no-op on that
+// column by design.
 func (q *Queries) FinishSearchRun(ctx context.Context, arg FinishSearchRunParams) (SearchRun, error) {
 	row := q.db.QueryRow(ctx, finishSearchRun,
 		arg.FinishedAt,
@@ -162,6 +193,7 @@ func (q *Queries) FinishSearchRun(ctx context.Context, arg FinishSearchRunParams
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.Notes,
+		&i.EligibleAgainCount,
 	)
 	return i, err
 }
@@ -236,6 +268,40 @@ func (q *Queries) GetSearchProfileByName(ctx context.Context, arg GetSearchProfi
 	return i, err
 }
 
+const getSearchProfileNamesByIDs = `-- name: GetSearchProfileNamesByIDs :many
+SELECT id, name FROM search_profiles WHERE tenant_id = $1 AND id = ANY ($2::uuid[])
+`
+
+type GetSearchProfileNamesByIDsParams struct {
+	TenantID uuid.UUID
+	Ids      []uuid.UUID
+}
+
+type GetSearchProfileNamesByIDsRow struct {
+	ID   uuid.UUID
+	Name string
+}
+
+func (q *Queries) GetSearchProfileNamesByIDs(ctx context.Context, arg GetSearchProfileNamesByIDsParams) ([]GetSearchProfileNamesByIDsRow, error) {
+	rows, err := q.db.Query(ctx, getSearchProfileNamesByIDs, arg.TenantID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetSearchProfileNamesByIDsRow{}
+	for rows.Next() {
+		var i GetSearchProfileNamesByIDsRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSearchProfiles = `-- name: ListSearchProfiles :many
 SELECT id, tenant_id, name, description, active, keywords, titles, locations, remote_only, min_compensation, currency, seniority, company_allowlist, company_blocklist, exclude_keywords, resurface_policy, created_at, updated_at FROM search_profiles
 WHERE tenant_id = $1
@@ -288,11 +354,11 @@ func (q *Queries) ListSearchProfiles(ctx context.Context, arg ListSearchProfiles
 }
 
 const listSearchRuns = `-- name: ListSearchRuns :many
-SELECT id, tenant_id, profile_id, source, query, candidates_seen, new_count, duplicate_count, needs_review_count, started_at, finished_at, notes FROM search_runs
+SELECT id, tenant_id, profile_id, source, query, candidates_seen, new_count, duplicate_count, needs_review_count, started_at, finished_at, notes, eligible_again_count FROM search_runs
 WHERE tenant_id = $1
   AND ($2::uuid IS NULL OR profile_id = $2::uuid)
   AND ($3::timestamptz IS NULL OR started_at >= $3::timestamptz)
-ORDER BY started_at DESC
+ORDER BY started_at DESC, id DESC
 LIMIT $4
 `
 
@@ -330,6 +396,7 @@ func (q *Queries) ListSearchRuns(ctx context.Context, arg ListSearchRunsParams) 
 			&i.StartedAt,
 			&i.FinishedAt,
 			&i.Notes,
+			&i.EligibleAgainCount,
 		); err != nil {
 			return nil, err
 		}
@@ -343,29 +410,34 @@ func (q *Queries) ListSearchRuns(ctx context.Context, arg ListSearchRunsParams) 
 
 const recordSearchRunProgress = `-- name: RecordSearchRunProgress :one
 UPDATE search_runs
-SET candidates_seen    = candidates_seen + $1,
-    new_count          = new_count + $2,
-    duplicate_count    = duplicate_count + $3,
-    needs_review_count = needs_review_count + $4
-WHERE id = $5 AND tenant_id = $6
-RETURNING id, tenant_id, profile_id, source, query, candidates_seen, new_count, duplicate_count, needs_review_count, started_at, finished_at, notes
+SET candidates_seen      = candidates_seen + $1,
+    new_count            = new_count + $2,
+    eligible_again_count = eligible_again_count + $3,
+    duplicate_count      = duplicate_count + $4,
+    needs_review_count   = needs_review_count + $5
+WHERE id = $6 AND tenant_id = $7 AND finished_at IS NULL
+RETURNING id, tenant_id, profile_id, source, query, candidates_seen, new_count, duplicate_count, needs_review_count, started_at, finished_at, notes, eligible_again_count
 `
 
 type RecordSearchRunProgressParams struct {
-	CandidatesSeen   int32
-	NewCount         int32
-	DuplicateCount   int32
-	NeedsReviewCount int32
-	ID               uuid.UUID
-	TenantID         uuid.UUID
+	CandidatesSeen     int32
+	NewCount           int32
+	EligibleAgainCount int32
+	DuplicateCount     int32
+	NeedsReviewCount   int32
+	ID                 uuid.UUID
+	TenantID           uuid.UUID
 }
 
 // Counts accumulate across calls so a long routine can report incrementally
-// rather than buffering every result until the run ends.
+// rather than buffering every result until the run ends. Guarded against a
+// finished run: without it, a stale search_run_id keeps inflating a run's
+// counters after FinishSearchRun has already closed it out.
 func (q *Queries) RecordSearchRunProgress(ctx context.Context, arg RecordSearchRunProgressParams) (SearchRun, error) {
 	row := q.db.QueryRow(ctx, recordSearchRunProgress,
 		arg.CandidatesSeen,
 		arg.NewCount,
+		arg.EligibleAgainCount,
 		arg.DuplicateCount,
 		arg.NeedsReviewCount,
 		arg.ID,
@@ -385,6 +457,7 @@ func (q *Queries) RecordSearchRunProgress(ctx context.Context, arg RecordSearchR
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.Notes,
+		&i.EligibleAgainCount,
 	)
 	return i, err
 }

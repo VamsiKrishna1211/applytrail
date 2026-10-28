@@ -22,7 +22,7 @@ type upsertContactRequestDTO struct {
 
 func (h *handlers) handleUpsertContact(w http.ResponseWriter, r *http.Request) {
 	var body upsertContactRequestDTO
-	if err := decodeJSON(r, &body); err != nil {
+	if err := decodeJSON(w, r, &body); err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -63,7 +63,12 @@ func (h *handlers) handleListContacts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	contacts, err := h.svc.ListContacts(r.Context(), principalOf(r), companyID, intParam(r.URL.Query().Get("limit"), 50))
+	limit, err := intParam("limit", r.URL.Query().Get("limit"), 50, maxLimit)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	contacts, err := h.svc.ListContacts(r.Context(), principalOf(r), companyID, limit)
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -171,7 +176,7 @@ type createKeyResponseDTO struct {
 
 func (h *handlers) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 	var body createKeyRequestDTO
-	if err := decodeJSON(r, &body); err != nil {
+	if err := decodeJSON(w, r, &body); err != nil {
 		writeError(w, r, err)
 		return
 	}

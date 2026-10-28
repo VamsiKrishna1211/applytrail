@@ -32,22 +32,31 @@ func Available() bool {
 	return ok
 }
 
+// Options configure what the document may load besides itself.
+type Options struct {
+	// ClerkFrontendAPI is the origin of the Clerk instance the page signs in
+	// with, e.g. https://example.clerk.accounts.dev. Empty means the page
+	// does not use Clerk, and loads nothing from anywhere but this origin.
+	ClerkFrontendAPI string
+}
+
 // Handler serves the embedded bundle, or nil when none was compiled in.
 //
 // A nil return is deliberate rather than a handler that reports the UI is
 // missing: the router treats a nil dependency as "this surface does not
 // exist", so a server built without the tag answers exactly as it did before
 // the UI existed.
-func Handler() http.Handler {
+func Handler(opts Options) http.Handler {
 	fsys, ok := assets()
 	if !ok {
 		return nil
 	}
-	return &handler{fsys: fsys}
+	return &handler{fsys: fsys, csp: contentSecurityPolicy(opts)}
 }
 
 type handler struct {
 	fsys fs.FS
+	csp  string
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -99,7 +108,7 @@ func (h *handler) serveFile(w http.ResponseWriter, r *http.Request, name string)
 		return false
 	}
 
-	setSecurityHeaders(w)
+	setSecurityHeaders(w, h.csp)
 	if strings.HasPrefix(name, assetPrefix) {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	} else {
@@ -115,25 +124,46 @@ func (h *handler) serveFile(w http.ResponseWriter, r *http.Request, name string)
 }
 
 // setSecurityHeaders locks the document down.
-//
-// This matters more here than on a typical static site: the page holds an API
-// key for the life of the tab, so the budget for injected script is zero.
-// Inline styles stay allowed because the UI sets widths and colours from data;
-// inline script does not.
-func setSecurityHeaders(w http.ResponseWriter) {
+func setSecurityHeaders(w http.ResponseWriter, csp string) {
 	header := w.Header()
 	header.Set("X-Content-Type-Options", "nosniff")
 	header.Set("Referrer-Policy", "same-origin")
-	header.Set("Content-Security-Policy", strings.Join([]string{
+	header.Set("Content-Security-Policy", csp)
+}
+
+// contentSecurityPolicy builds the policy once, at startup.
+//
+// This matters more here than on a typical static site: the page holds a
+// credential for the life of the tab, so the budget for injected script is
+// zero. Inline styles stay allowed because the UI sets widths and colours from
+// data; inline script does not.
+//
+// Signing in with Clerk widens it by exactly what Clerk's browser SDK needs:
+// its script and API on the instance's own origin, avatars from img.clerk.com,
+// a blob worker for session refresh, and Cloudflare Turnstile, which Clerk
+// shows as a bot check. Nothing else is let in.
+func contentSecurityPolicy(opts Options) string {
+	script, connect, img, frame, worker := "'self'", "'self'", "'self' data:", "'none'", "'self'"
+	if fapi := opts.ClerkFrontendAPI; fapi != "" {
+		const turnstile = "https://challenges.cloudflare.com"
+		script += " " + fapi + " " + turnstile
+		connect += " " + fapi
+		img += " https://img.clerk.com"
+		frame = turnstile
+		worker += " blob:"
+	}
+	return strings.Join([]string{
 		"default-src 'self'",
-		"script-src 'self'",
+		"script-src " + script,
 		"style-src 'self' 'unsafe-inline'",
-		"img-src 'self' data:",
+		"img-src " + img,
 		"font-src 'self'",
-		"connect-src 'self'",
+		"connect-src " + connect,
+		"frame-src " + frame,
+		"worker-src " + worker,
 		"base-uri 'none'",
 		"object-src 'none'",
 		"frame-ancestors 'none'",
 		"form-action 'none'",
-	}, "; "))
+	}, "; ")
 }

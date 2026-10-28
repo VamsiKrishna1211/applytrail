@@ -9,7 +9,7 @@
 }
 
 .tile {
-  padding: .95rem 1.05rem;
+  padding: .7rem .85rem;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -19,7 +19,7 @@
 .value {
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
-  font-size: 1.9rem;
+  font-size: 1.45rem;
   line-height: 1.25;
   font-weight: 600;
   letter-spacing: -.02em;

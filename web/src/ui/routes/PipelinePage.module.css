@@ -1,23 +1,27 @@
-.head {
+/* The page is the frame's contents: a fixed head, a board that takes the rest,
+ * a fixed move bar. The children are laid out as a flex column rather than
+ * grid rows because two of them are conditional. */
+.page {
   display: flex;
-  align-items: flex-end;
-  gap: 1.25rem;
-  margin-bottom: 1.25rem;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  gap: .9rem;
+}
+
+.head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
 }
 
 .title {
-  font-size: 1.75rem;
+  font-size: 1.25rem;
   font-weight: 680;
 }
 
-.lede {
-  margin-top: .1rem;
-  font-size: .9rem;
-  color: var(--ink-2);
-}
-
 .segmented {
-  margin-left: auto;
   display: flex;
   gap: 2px;
   padding: 2px;
@@ -42,8 +46,55 @@
   font-weight: 650;
 }
 
+/* Same vocabulary as the top bar's search, because it is the same gesture on
+ * a smaller subject: that one finds an application anywhere in the pipeline,
+ * this one narrows the board in front of you. */
+.filter {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  width: min(18rem, 26vw);
+  padding: .3rem .45rem .3rem .65rem;
+  background: var(--sunk);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.filter:focus-within {
+  background: var(--surface);
+  border-color: var(--accent);
+}
+
+.filterInput {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  font-size: .85rem;
+  color: var(--ink);
+}
+
+.filterInput:focus { outline: none; }
+.filterInput::-webkit-search-cancel-button { display: none; }
+
+.filterClear {
+  border: 0;
+  background: transparent;
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--muted);
+  padding: 0 .2rem;
+}
+
+.filterCount {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: .8rem;
+  color: var(--muted);
+}
+
 .more {
-  margin-top: 1rem;
+  margin-left: auto;
   display: flex;
   align-items: center;
   gap: .75rem;
@@ -64,14 +115,19 @@
   color: var(--muted);
 }
 
-.bar {
-  position: sticky;
-  bottom: 1rem;
-  margin-top: 1.5rem;
-}
+.bar { flex: 0 0 auto; }
 
 .loading {
+  flex: 1 1 auto;
+  min-height: 0;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--columns, 6), minmax(190px, 1fr));
+  align-content: start;
   gap: 1rem;
+}
+
+@media (max-width: 40rem) {
+  .loading { grid-template-columns: repeat(var(--columns, 6), minmax(248px, 1fr)); }
+  .moreNote { display: none; }
+  .filter { width: auto; flex: 1 1 6rem; }
 }

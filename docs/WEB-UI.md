@@ -27,7 +27,7 @@ For a hot-reloading loop, run the two apart:
 
 ```bash
 make run       # the API on :8080
-make web-dev   # the client on :5173, proxying /v1 to :8080
+make web-dev   # the client on :5173, proxying /v1 and /auth to :8080
 ```
 
 Vite proxies the API in development, so the browser still sees one origin and
@@ -35,9 +35,23 @@ the server still needs no CORS.
 
 ## Signing in
 
-There is no browser login. The API authenticates with API keys, so the UI asks
-for one and sends it as `Authorization: Bearer …` exactly as any other client
-would.
+On a server with Clerk sign-in configured (see
+[CONFIGURATION.md](CONFIGURATION.md#clerk)), the gate is Clerk's sign-in form.
+The browser never holds a long-lived secret: Clerk keeps the session, and the
+client asks it for a fresh token, valid for a minute, before each request. The
+server checks the token's signature locally against Clerk's published keys,
+refuses one minted for a page on any other origin, and maps the account to its
+tenant through `APPLYTRAIL_CLERK_TENANTS`. A signed-in person gets `read` and
+`write`, never `admin`.
+
+The client learns whether to offer it from `GET /auth/config` before it first
+renders, so one image serves any deployment. A server without Clerk, or one too
+old to answer, gets the API key form.
+
+Every server also accepts an API key, behind **Use an API key instead** when
+Clerk is on and as the only option when it is off. The UI sends it as
+`Authorization: Bearer …` exactly as any other client would. A pasted key wins
+over a Clerk session while it is held.
 
 **Issue it `read` and `write`, never `admin`:**
 
@@ -52,14 +66,19 @@ key it is holding. An admin key could mint more credentials from there; a
 read+write key cannot.
 
 The document is served with a content security policy that permits no inline
-script and no third-party origin, which is what keeps that budget at zero. See
-[Security](SECURITY.md) for the wider trust model.
+script and no third-party origin, which is what keeps that budget at zero. With
+Clerk on, it admits exactly what Clerk's SDK needs: the instance's own Frontend
+API origin, `img.clerk.com` for avatars, and Cloudflare Turnstile for Clerk's
+bot check. Inline script stays forbidden. See [Security](SECURITY.md) for the
+wider trust model.
 
 If the server rejects a key, the client drops it and returns to the unlock
 screen rather than leaving a signed-in UI that fails every request — and says
 why, quoting the error code, the message and the request id. Dropping the key
 silently was worse than not dropping it: the unlock appeared to work and then
-bounced, with nothing to read.
+bounced, with nothing to read. A refused Clerk session is signed out the same
+way, and the screen says the account is not linked to any ApplyTrail data,
+since signing in itself worked.
 
 The commonest cause of a refusal is not a bad key but the wrong database. A key
 exists only in the database it was created in, so one minted against local
@@ -70,6 +89,7 @@ screen names this, because the key itself looks perfectly valid.
 
 | Page | Reads | Writes |
 |---|---|---|
+| Top-bar search | `GET /v1/applications` (every status) | — |
 | Dashboard | `GET /v1/stats`, `GET /v1/applications/followups` | — |
 | Pipeline | `GET /v1/applications?status=…` | `PATCH /v1/applications/{id}` |
 | Detail drawer | `GET /v1/applications/{id}` | `PATCH /v1/applications/{id}`, `POST /v1/applications/{id}/notes` |
@@ -78,10 +98,17 @@ The funnel reports every status, empty ones included, because that is what the
 endpoint returns and a chart that changes shape as data arrives is harder to
 read than one that does not.
 
-The board splits into **Active** (`queued` through `offer`) and **Closed**
-(`accepted`, `rejected`, `ghosted`, `withdrawn`). `discovered` and
-`screened_out` appear in neither: those are triage states, and a posting in
-them has no application to move.
+The board splits into **Active** (`discovered` through `offer`) and **Closed**
+(`screened_out`, `accepted`, `rejected`, `ghosted`, `withdrawn`). Between them
+they name every status, because a status on neither board is a status whose
+cards cannot be reached at all: `record_discoveries` writes a real application
+row at `discovered`, and leaving that column off hid the entire intake.
+
+`discovered` is fetched by a query of its own rather than with the rest of the
+Active view. The list endpoint pages one result set ordered by creation, newest
+first, and a search run writes a burst of new rows — so a shared page of 100
+would have been all intake and none of the columns you were working in. The two
+lists share one **Load more**, which advances whichever still has pages.
 
 ## Search
 
@@ -95,12 +122,62 @@ Choosing a result opens the detail drawer, which is where a status is changed
 by hand — so a company can be found and moved without knowing which board it
 was sitting on, or whether it was on one at all.
 
+The Pipeline's own box, beside **Active/Closed**, is a different gesture on a
+smaller subject: it narrows the board in front of you rather than searching the
+pipeline, matching with the same rules over the cards already loaded. It says
+`12 of 40` while it is filtering, because a board of empty columns otherwise
+reads as a board with nothing on it, and Escape clears it. A card the filter
+hides takes the move bar with it and gets it back when the filter is cleared.
+
 It searches every status, not the current view, and it fetches nothing until
 two characters are typed. That one request covers the most recent 200
 applications and every keystroke after it is local: the list endpoint's only
 text parameter is an exact company match, so substring search has to happen in
 the browser. The footer says how many were searched and offers **search older**
 while pages remain, rather than implying a whole pipeline was covered.
+
+## Both pages scroll in place
+
+Neither page is a document. The window does not scroll; the parts do.
+
+On **Pipeline** the top bar, the page head and the move bar are fixed rows, and
+each status column scrolls its own cards with its heading pinned. A long
+`applied` column no longer drags every other column's heading off the screen,
+and the move bar is where it was when you selected the card. Columns hold a
+minimum width rather than dividing whatever is there, so six columns on a
+narrow window scroll sideways instead of squeezing to widths nothing can be
+read at. The minimum is what six of them need to fit a 1280px main.
+
+On the **Dashboard** the head and the four tiles are fixed, and the three
+panels below them each scroll inside their own bounds. That matters most for
+the funnel and the queue: the funnel is the control that filters the queue
+beside it, and reading to the bottom of a fifty-row queue used to take the
+control with it.
+
+The variant table takes only the height its rows need rather than a fixed
+share, so a handful of variants leaves the space to the lists above — but it is
+capped and scrolls beyond that, because `/v1/stats` returns one row per resume
+variant ever used and puts no limit on how many that is. Its column headings
+pin themselves while its rows move.
+
+Below 64rem both dashboard columns stack, and a frame stops helping: four
+scroll boxes sharing a phone's height is worse than a page that simply scrolls.
+At that width the Dashboard hands the scroll back to the page.
+
+## Light and dark
+
+The tokens follow `prefers-color-scheme`, and the control beside **sign out**
+overrides it: system, light, dark, then back to system. "Follow the system" is
+the default and needs no stored value, so nothing is written until a side is
+picked.
+
+The choice is held in `localStorage` — unlike the credential, which is
+deliberately in `sessionStorage` — because a theme is a preference rather than
+a secret, and one that died with the tab would be worth less than none. It is
+applied by `web/public/theme.js` in `<head>`, ahead of the first paint and long
+ahead of React, so a chosen theme does not flash the other one on every load.
+That is a file rather than an inline script because the CSP permits no inline
+script; being same-origin, it needs no exception.
 
 ## Transitions
 
@@ -113,6 +190,14 @@ promise.
 This is a convenience, not an authority. The service still validates every
 transition, and a card that moved in another tab produces a `409` that the UI
 reports rather than swallows.
+
+The bar also carries the posting's link, beside the company and the current
+status, so which listing a card stands for is visible at the moment you decide
+where it goes. The URL is free text whoever recorded the application supplied,
+so `postingLink` in `web/src/ui/format.ts` parses it and renders a link only
+for `http` and `https` — a `javascript:` URL becomes no link at all. The label
+drops the scheme and any leading `www.` and truncates; the full URL is the
+`title`. A posting with no usable link says so rather than showing nothing.
 
 The client's copy of the graph lives in `web/src/core/domain/status.ts` and is
 compared against `internal/domain/application.go` by a Go test. Change the Go

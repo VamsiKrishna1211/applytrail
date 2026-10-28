@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/VamsiKrishna1211/applytrail/internal/dedupe"
@@ -220,6 +221,17 @@ func (s *Service) createPosting(ctx context.Context, tx store.Store, p domain.Pr
 		return domain.Posting{}, domain.Application{}, domain.NewValidationError(
 			"cannot record a posting with no identifiable company: supply company, or a url from a supported job board")
 	}
+	if n.Title == "" {
+		// A titleless posting can never be matched again: tiers 3 and 5 both
+		// skip a candidate with no title, on purpose, because a fingerprint
+		// or a similarity score built from nothing would match everything.
+		// Recording one anyway creates a posting no future sighting of the
+		// same job can ever be recognised against — and, since the
+		// fingerprint index is keyed on (company, title, location), a second
+		// title-less posting at the same company collides with it outright.
+		return domain.Posting{}, domain.Application{}, domain.NewValidationError(
+			"cannot record a posting with no identifiable title: supply title, or a url whose page title dedupe can read")
+	}
 
 	company, err := tx.Companies().Upsert(ctx, domain.Company{
 		TenantID:       p.TenantID,
@@ -292,14 +304,22 @@ func (s *Service) appendEvent(ctx context.Context, tx store.Store, p domain.Prin
 }
 
 // recordRunProgress is best-effort bookkeeping; a failure here must not fail
-// the caller's actual request.
+// the caller's actual request. It is not, however, a failure worth hiding
+// entirely: a wrong or already-finished search_run_id is a caller mistake
+// worth a log line, even though the filter/ingest result the caller actually
+// asked for is unaffected.
 func (s *Service) recordRunProgress(ctx context.Context, tenantID, runID domain.ID, summary Summary) {
-	_, _ = s.store.SearchRuns().RecordProgress(context.WithoutCancel(ctx), tenantID, runID, store.SearchRunProgress{
-		CandidatesSeen:   summary.Total,
-		NewCount:         summary.New + summary.EligibleAgain,
-		DuplicateCount:   summary.Duplicate,
-		NeedsReviewCount: summary.NeedsReview,
+	_, err := s.store.SearchRuns().RecordProgress(context.WithoutCancel(ctx), tenantID, runID, store.SearchRunProgress{
+		CandidatesSeen:     summary.Total,
+		NewCount:           summary.New,
+		EligibleAgainCount: summary.EligibleAgain,
+		DuplicateCount:     summary.Duplicate,
+		NeedsReviewCount:   summary.NeedsReview,
 	})
+	if err != nil {
+		slog.Warn("search run progress not recorded",
+			"search_run_id", runID, "tenant_id", tenantID, "error", err)
+	}
 }
 
 func validateCandidates(candidates []domain.Candidate) error {
@@ -319,7 +339,12 @@ func validateCandidates(candidates []domain.Candidate) error {
 				for _, problem := range invalid.Details() {
 					v.Add("candidates[%d]: %s", i, problem)
 				}
+				continue
 			}
+			// Validate() only ever returns nil or *ValidationError today, but
+			// silently accepting an error of any other shape would let a
+			// future validation rule pass candidates it meant to reject.
+			v.Add("candidates[%d]: %s", i, err.Error())
 		}
 	}
 	return v.OrNil()

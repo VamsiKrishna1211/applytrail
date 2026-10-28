@@ -78,6 +78,10 @@ export function GlobalSearch() {
 
   function onKeyDown(event: React.KeyboardEvent) {
     if (event.key === 'Escape') {
+      // Without this, clearing the search box also closed an open drawer:
+      // ApplicationDrawer listens for Escape on `document`, so an
+      // unstopped keystroke handled here reached it too.
+      event.stopPropagation()
       if (query) setQuery('')
       setOpen(false)
       return

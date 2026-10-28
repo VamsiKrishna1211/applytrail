@@ -77,12 +77,21 @@ func (s *Server) Handler() http.Handler {
 // place, for both transports. Capturing it in the tool closures means a
 // handler cannot forget to authorise.
 func (s *Server) serverFor(r *http.Request) *mcp.Server {
-	principal, _ := auth.PrincipalFromContext(r.Context())
-
 	srv := mcp.NewServer(
 		&mcp.Implementation{Name: "applytrail", Version: s.version},
 		&mcp.ServerOptions{Instructions: instructions, SchemaCache: s.cache},
 	)
+
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	if !ok {
+		// The /mcp route always runs authenticate() ahead of this handler, so
+		// this should never happen. If it ever does, a zero-value Principal
+		// carries TenantID == uuid.Nil — registering tools bound to it would
+		// let every call run scoped to that nil tenant instead of visibly
+		// failing. No tools registered means every call errors as unknown,
+		// which is the safe direction to fail in.
+		return srv
+	}
 	s.registerTools(srv, principal)
 	return srv
 }

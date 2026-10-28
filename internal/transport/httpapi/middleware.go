@@ -3,6 +3,7 @@ package httpapi
 import (
 	"log/slog"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
@@ -15,12 +16,22 @@ import (
 // and echoed on every response.
 const requestIDHeader = "X-Request-Id"
 
+// maxClientRequestIDLen bounds a client-supplied request ID. It is echoed
+// into every structured log line for the request, so an unbounded value is a
+// log-inflation vector, not just cosmetic.
+const maxClientRequestIDLen = 128
+
+// validRequestID matches the character set a trace ID or UUID actually needs:
+// no whitespace or control characters, so a value cannot inject a fake extra
+// log line or corrupt the log format when concatenated in.
+var validRequestID = regexp.MustCompile(`^[A-Za-z0-9._:-]+$`)
+
 // requestID assigns each request a correlation ID, publishes it on the
 // context for the logger, and echoes it to the client.
 func requestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get(requestIDHeader)
-		if id == "" {
+		if id == "" || len(id) > maxClientRequestIDLen || !validRequestID.MatchString(id) {
 			id = uuid.NewString()
 		}
 		w.Header().Set(requestIDHeader, id)

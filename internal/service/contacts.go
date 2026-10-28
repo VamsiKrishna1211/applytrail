@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/VamsiKrishna1211/applytrail/internal/dedupe"
@@ -34,12 +35,29 @@ func (s *Service) UpsertContact(ctx context.Context, p domain.Principal, req Ups
 	var result domain.Contact
 	err := s.store.Tx(ctx, func(ctx context.Context, tx store.Store) error {
 		if req.Contact.CompanyID == nil && req.CompanyName != "" {
-			company, err := tx.Companies().GetByNormalizedName(ctx, p.TenantID, dedupe.NormalizeCompany(req.CompanyName))
-			if err == nil {
-				req.Contact.CompanyID = &company.ID
+			normalized := dedupe.NormalizeCompany(req.CompanyName)
+			// A name that normalizes to nothing ("  ", punctuation only) can
+			// never match: normalized_name is NOT NULL and non-empty on every
+			// company row, so skip the lookup rather than run a query that is
+			// guaranteed to miss.
+			if normalized != "" {
+				company, err := tx.Companies().GetByNormalizedName(ctx, p.TenantID, normalized)
+				switch {
+				case err == nil:
+					req.Contact.CompanyID = &company.ID
+				case errors.Is(err, domain.ErrNotFound):
+					// A contact at a company with no postings on record is
+					// still worth keeping, so an unresolved name is not an
+					// error.
+				default:
+					// Any other failure (a real database error) must abort
+					// the transaction rather than be swallowed: inside
+					// store.Tx, continuing past it only fails opaquely on the
+					// next statement, once Postgres has already marked the
+					// transaction aborted.
+					return err
+				}
 			}
-			// A contact at a company with no postings on record is still worth
-			// keeping, so an unresolved name is not an error.
 		}
 
 		contact, err := tx.Contacts().Upsert(ctx, req.Contact)
@@ -51,7 +69,7 @@ func (s *Service) UpsertContact(ctx context.Context, p domain.Principal, req Ups
 			if _, err := tx.Applications().Get(ctx, p.TenantID, *req.LinkToApplicationID); err != nil {
 				return err
 			}
-			if err := tx.Contacts().LinkToApplication(ctx, *req.LinkToApplicationID, contact.ID); err != nil {
+			if err := tx.Contacts().LinkToApplication(ctx, p.TenantID, *req.LinkToApplicationID, contact.ID); err != nil {
 				return err
 			}
 			if err := s.appendEvent(ctx, tx, p, *req.LinkToApplicationID, domain.ApplicationEvent{

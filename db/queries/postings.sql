@@ -2,13 +2,19 @@
 -- candidate set, rather than one per candidate. Each returns the joined
 -- application status so the resurfacing policy can be applied without a
 -- second query.
+--
+-- Every join below is pinned to the posting's own tenant_id, not just the
+-- outer WHERE clause: the schema does not forbid an applications row from
+-- pointing at another tenant's posting (the unique constraint is on
+-- (tenant_id, posting_id), not on posting_id alone), so an unpinned join is a
+-- latent cross-tenant leak of application_status, not just a redundant guard.
 
 -- name: FindPostingsByCanonicalURLs :many
-SELECT p.id, p.canonical_url, p.source, p.external_id, p.fingerprint,
+SELECT p.id, p.company_id, p.canonical_url, p.source, p.external_id, p.fingerprint,
        p.description_hash, p.first_seen_at, p.last_seen_at,
        a.id AS application_id, a.status AS application_status
 FROM postings p
-LEFT JOIN applications a ON a.posting_id = p.id
+LEFT JOIN applications a ON a.posting_id = p.id AND a.tenant_id = p.tenant_id
 WHERE p.tenant_id = @tenant_id
   AND p.canonical_url = ANY (@canonical_urls::text[]);
 
@@ -16,31 +22,36 @@ WHERE p.tenant_id = @tenant_id
 -- "source|external_id" key so the whole candidate set is a single array
 -- parameter; the expression index in migration 00002 serves it directly.
 -- name: FindPostingsByExternalIDs :many
-SELECT p.id, p.canonical_url, p.source, p.external_id, p.fingerprint,
+SELECT p.id, p.company_id, p.canonical_url, p.source, p.external_id, p.fingerprint,
        p.description_hash, p.first_seen_at, p.last_seen_at,
        a.id AS application_id, a.status AS application_status
 FROM postings p
-LEFT JOIN applications a ON a.posting_id = p.id
+LEFT JOIN applications a ON a.posting_id = p.id AND a.tenant_id = p.tenant_id
 WHERE p.tenant_id = @tenant_id
   AND p.external_id <> ''
   AND (p.source || '|' || p.external_id) = ANY (@source_external_ids::text[]);
 
 -- name: FindPostingsByFingerprints :many
-SELECT p.id, p.canonical_url, p.source, p.external_id, p.fingerprint,
+SELECT p.id, p.company_id, p.canonical_url, p.source, p.external_id, p.fingerprint,
        p.description_hash, p.first_seen_at, p.last_seen_at,
        a.id AS application_id, a.status AS application_status
 FROM postings p
-LEFT JOIN applications a ON a.posting_id = p.id
+LEFT JOIN applications a ON a.posting_id = p.id AND a.tenant_id = p.tenant_id
 WHERE p.tenant_id = @tenant_id
   AND p.fingerprint = ANY (@fingerprints::text[]);
 
+-- Scoped to the candidates' own employers, like the fuzzy tier: two different
+-- companies reposting the same boilerplate text are not the same job, and a
+-- content hash alone cannot tell the difference. The company filter is
+-- necessary, not just an optimisation.
 -- name: FindPostingsByDescriptionHashes :many
-SELECT p.id, p.canonical_url, p.source, p.external_id, p.fingerprint,
+SELECT p.id, p.company_id, p.canonical_url, p.source, p.external_id, p.fingerprint,
        p.description_hash, p.first_seen_at, p.last_seen_at,
        a.id AS application_id, a.status AS application_status
 FROM postings p
-LEFT JOIN applications a ON a.posting_id = p.id
+LEFT JOIN applications a ON a.posting_id = p.id AND a.tenant_id = p.tenant_id
 WHERE p.tenant_id = @tenant_id
+  AND p.company_id = ANY (@company_ids::uuid[])
   AND p.description_hash <> ''
   AND p.description_hash = ANY (@description_hashes::text[]);
 
@@ -53,7 +64,7 @@ SELECT p.id, p.canonical_url, p.normalized_title, p.location_bucket,
        a.id AS application_id, a.status AS application_status,
        similarity(p.normalized_title, @normalized_title::text) AS score
 FROM postings p
-LEFT JOIN applications a ON a.posting_id = p.id
+LEFT JOIN applications a ON a.posting_id = p.id AND a.tenant_id = p.tenant_id
 WHERE p.tenant_id = @tenant_id
   AND p.company_id = @company_id
   AND p.normalized_title % @normalized_title::text

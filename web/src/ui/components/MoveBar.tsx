@@ -1,6 +1,7 @@
 import type { Application } from '@/core/domain/models'
 import { statusLabel, type Status } from '@/core/domain/status'
 import { describeMoves } from '@/core/usecases/describeMoves'
+import { postingLink } from '@/ui/format'
 import { toneOf } from '@/ui/tone'
 import { ErrorNotice } from './Feedback'
 import styles from './MoveBar.module.css'
@@ -37,6 +38,7 @@ export function MoveBar({
   }
 
   const { moves, terminal, hint } = describeMoves(application.status)
+  const link = postingLink(application.url)
 
   return (
     <div className={`${styles.bar} ${styles.armed}`}>
@@ -51,6 +53,25 @@ export function MoveBar({
               open timeline
             </button>
           </div>
+
+          {/* The posting itself. Said in full rather than as an "open" button:
+              which listing a card stands for is the thing you check before
+              moving it, and a bare verb hides that. Absence is stated too — a
+              missing link and a link that failed to render look the same
+              otherwise. */}
+          {link ? (
+            <a
+              className={styles.link}
+              href={link.href}
+              target="_blank"
+              rel="noreferrer noopener"
+              title={link.href}
+            >
+              {link.label}
+            </a>
+          ) : (
+            <span className={styles.noLink}>no posting link on record</span>
+          )}
         </div>
 
         <div className={styles.moves}>

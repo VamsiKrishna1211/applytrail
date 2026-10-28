@@ -1,10 +1,10 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useServices } from '@/app/ServicesProvider'
 import { statusLabel, type Status } from '@/core/domain/status'
 import { describeMoves } from '@/core/usecases/describeMoves'
 import { useApplication } from '@/ui/hooks/useApplication'
 import { useAddNote, useUpdateStatus } from '@/ui/hooks/useApplicationMutations'
-import { dwellLabel, formatDate } from '@/ui/format'
+import { dwellLabel, formatDate, postingLink } from '@/ui/format'
 import { toneOf } from '@/ui/tone'
 import { EmptyState, ErrorNotice, Skeleton } from './Feedback'
 import { StatusChip } from './StatusChip'
@@ -27,16 +27,34 @@ export function ApplicationDrawer({ id, onClose }: { id: string; onClose: () => 
   const [draft, setDraft] = useState('')
 
   // Escape closes it. Bound while the drawer is open and released on unmount,
-  // so nothing lingers on the document once it is gone.
+  // so nothing lingers on the document once it is gone. Not while a note
+  // draft is sitting unsent, though: this listener is on `document`, so it
+  // used to fire even with focus inside the textarea and silently discard
+  // whatever had been typed. A ref, not the draft state itself, is read here
+  // deliberately — re-binding this listener on every keystroke to keep a
+  // state closure current would be its own bug.
+  const draftRef = useRef(draft)
+  draftRef.current = draft
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape' && !draftRef.current.trim()) onClose()
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [onClose])
 
   const application = detail.data?.application
+
+  // Focus moves into the drawer on open and back to whatever had it once the
+  // drawer closes — without this, the scrim's Close button (which precedes
+  // the drawer in DOM order) was the only reachable thing by keyboard, and a
+  // keyboard user closing the drawer landed nowhere in particular.
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null
+    closeButtonRef.current?.focus()
+    return () => previouslyFocused?.focus()
+  }, [])
 
   function move(to: Status) {
     updateStatus.mutate({ id, change: { status: to } })
@@ -53,12 +71,18 @@ export function ApplicationDrawer({ id, onClose }: { id: string; onClose: () => 
     <>
       <button type="button" className={drawer.scrim} aria-label="Close" onClick={onClose} />
 
-      <aside className={drawer.drawer} aria-label="Application detail">
+      <aside className={drawer.drawer} role="dialog" aria-modal="true" aria-label="Application detail">
         <header className={drawer.head}>
           <div className={drawer.headTop}>
             <span className="eyebrow">Application</span>
             <span className={drawer.id}>{id.slice(0, 8)}</span>
-            <button type="button" className={drawer.close} onClick={onClose} aria-label="Close">
+            <button
+              ref={closeButtonRef}
+              type="button"
+              className={drawer.close}
+              onClick={onClose}
+              aria-label="Close"
+            >
               ×
             </button>
           </div>
@@ -74,16 +98,19 @@ export function ApplicationDrawer({ id, onClose }: { id: string; onClose: () => 
                 {application.company ?? 'unknown company'}
                 {application.location ? ` · ${application.location}` : ''}
               </p>
-              {application.url ? (
-                <a
-                  className={drawer.link}
-                  href={application.url}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                >
-                  {application.url}
-                </a>
-              ) : null}
+              {(() => {
+                // postingLink parses and rejects anything that is not
+                // http(s) — a javascript: URL above all. application.url is
+                // free text a caller supplied over the API; rendering it as
+                // a raw href would make it a live link, which MoveBar
+                // already gets right and this drawer used to not.
+                const link = postingLink(application.url)
+                return link ? (
+                  <a className={drawer.link} href={link.href} target="_blank" rel="noreferrer noopener">
+                    {link.label}
+                  </a>
+                ) : null
+              })()}
 
               <div className={drawer.facts}>
                 <StatusChip status={application.status} size="large" />

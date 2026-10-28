@@ -37,6 +37,7 @@ export default defineConfig({
       '/v1': { target: DEV_API, changeOrigin: false },
       '/healthz': { target: DEV_API, changeOrigin: false },
       '/version': { target: DEV_API, changeOrigin: false },
+      '/auth': { target: DEV_API, changeOrigin: false },
     },
   },
 })

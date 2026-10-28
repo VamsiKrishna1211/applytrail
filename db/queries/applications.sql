@@ -44,11 +44,16 @@ RETURNING *;
 
 -- Keyset pagination on (created_at, id): stable under concurrent inserts,
 -- unlike OFFSET. Filters are optional; a NULL argument disables its clause.
+--
+-- Both joins are tenant-pinned, not just the outer WHERE: the schema does not
+-- forbid an applications row from referencing another tenant's posting (the
+-- unique constraint is on (tenant_id, posting_id), not on posting_id alone),
+-- so an unpinned join is a latent cross-tenant read.
 -- name: ListApplications :many
 SELECT a.*, p.title, p.canonical_url, p.location_bucket, c.name AS company_name
 FROM applications a
-JOIN postings  p ON p.id = a.posting_id
-JOIN companies c ON c.id = p.company_id
+JOIN postings  p ON p.id = a.posting_id AND p.tenant_id = a.tenant_id
+JOIN companies c ON c.id = p.company_id AND c.tenant_id = a.tenant_id
 WHERE a.tenant_id = @tenant_id
   AND (sqlc.narg('statuses')::text[] IS NULL
        OR a.status = ANY (sqlc.narg('statuses')::text[]))
@@ -63,16 +68,20 @@ ORDER BY a.created_at DESC, a.id DESC
 LIMIT @row_limit;
 
 -- The follow-up queue: engaged applications whose next action is due.
+-- 'ghosted' is included even though it is not IsEngaged(): it is explicitly
+-- re-enterable (an employer can resurface after months of silence) and
+-- UpdateStatus only clears next_action_at on a *terminal* status, so a
+-- follow-up date set while ghosted must still be able to surface here.
 -- name: ListFollowupsDue :many
-SELECT a.*, p.title, p.canonical_url, c.name AS company_name
+SELECT a.*, p.title, p.canonical_url, p.location_bucket, c.name AS company_name
 FROM applications a
-JOIN postings  p ON p.id = a.posting_id
-JOIN companies c ON c.id = p.company_id
+JOIN postings  p ON p.id = a.posting_id AND p.tenant_id = a.tenant_id
+JOIN companies c ON c.id = p.company_id AND c.tenant_id = a.tenant_id
 WHERE a.tenant_id = @tenant_id
   AND a.next_action_at IS NOT NULL
   AND a.next_action_at <= @due_before
-  AND a.status IN ('applied', 'screening', 'interview', 'offer')
-ORDER BY a.next_action_at
+  AND a.status IN ('applied', 'screening', 'interview', 'offer', 'ghosted')
+ORDER BY a.next_action_at, a.id
 LIMIT @row_limit;
 
 -- name: CountApplicationsByStatus :many

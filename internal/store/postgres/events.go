@@ -111,8 +111,9 @@ func (s contactStore) List(ctx context.Context, tenantID domain.ID, companyID *d
 	return contacts, nil
 }
 
-func (s contactStore) LinkToApplication(ctx context.Context, applicationID, contactID domain.ID) error {
+func (s contactStore) LinkToApplication(ctx context.Context, tenantID, applicationID, contactID domain.ID) error {
 	err := s.q.LinkContactToApplication(ctx, sqlcgen.LinkContactToApplicationParams{
+		TenantID:      tenantID,
 		ApplicationID: applicationID,
 		ContactID:     contactID,
 	})

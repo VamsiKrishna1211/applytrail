@@ -18,7 +18,12 @@
 
 .row:hover { border-color: var(--line-2); }
 
+/* Both wrappers stack their two lines. As bare inline spans the company ran
+ * into the role and the day counts into each other, and `.title`'s ellipsis
+ * had no block box to work in. */
 .identity {
+  display: flex;
+  flex-direction: column;
   flex-grow: 1;
   min-width: 0;
 }
@@ -38,7 +43,10 @@
 }
 
 .timing {
-  width: 6.6rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  width: 8rem;
   flex-shrink: 0;
   text-align: right;
   font-family: var(--mono);

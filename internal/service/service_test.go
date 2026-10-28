@@ -348,3 +348,104 @@ func TestListApplications(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// The timeline event recording a move to "applied" must name the status the
+// application actually left, not assume it always came from "discovered".
+func TestRecordApplication_FromStatusIsTheRealPriorStatus(t *testing.T) {
+	svc, principal := newService(t)
+	ctx := t.Context()
+
+	ingested, err := svc.IngestPostings(ctx, principal, service.IngestRequest{
+		Candidates: []domain.Candidate{greenhouseCandidate("4012345", "Senior Software Engineer II")},
+	})
+	require.NoError(t, err)
+	applicationID := *ingested.Results[0].ApplicationID
+	postingID := *ingested.Results[0].PostingID
+
+	queued, err := svc.UpdateStatus(ctx, principal, service.UpdateStatusRequest{
+		ApplicationID: applicationID,
+		Status:        domain.StatusQueued,
+	})
+	require.NoError(t, err)
+	require.Equal(t, domain.StatusQueued, queued.Status)
+
+	_, err = svc.RecordApplication(ctx, principal, service.RecordApplicationRequest{PostingID: &postingID})
+	require.NoError(t, err)
+
+	detail, err := svc.GetApplication(ctx, principal, applicationID, 50)
+	require.NoError(t, err)
+
+	var toApplied *domain.ApplicationEvent
+	for i, e := range detail.Events {
+		if e.Type == domain.EventStatusChanged && e.ToStatus != nil && *e.ToStatus == domain.StatusApplied {
+			toApplied = &detail.Events[i]
+		}
+	}
+	require.NotNil(t, toApplied, "the applied transition must be on the timeline")
+	require.NotNil(t, toApplied.FromStatus)
+	assert.Equal(t, domain.StatusQueued, *toApplied.FromStatus,
+		"the application actually left queued, not discovered")
+}
+
+// A second RecordApplication call for the same posting is a retry, not a new
+// event: it must not fabricate another status change, and the notes from
+// each call must accumulate rather than the second erasing the first.
+func TestRecordApplication_IsIdempotentAndAppendsNotes(t *testing.T) {
+	svc, principal := newService(t)
+	ctx := t.Context()
+
+	candidate := ptr(greenhouseCandidate("4012345", "Senior Software Engineer II"))
+
+	first, err := svc.RecordApplication(ctx, principal, service.RecordApplicationRequest{
+		Candidate: candidate,
+		Notes:     "tailored the resume for this one",
+	})
+	require.NoError(t, err)
+
+	second, err := svc.RecordApplication(ctx, principal, service.RecordApplicationRequest{
+		Candidate: candidate,
+		Notes:     "recruiter confirmed receipt",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, first.ID, second.ID)
+
+	assert.Contains(t, second.Notes, "tailored the resume for this one")
+	assert.Contains(t, second.Notes, "recruiter confirmed receipt")
+
+	detail, err := svc.GetApplication(ctx, principal, first.ID, 50)
+	require.NoError(t, err)
+
+	appliedEvents := 0
+	for _, e := range detail.Events {
+		if e.Type == domain.EventStatusChanged && e.ToStatus != nil && *e.ToStatus == domain.StatusApplied {
+			appliedEvents++
+		}
+	}
+	assert.Equal(t, 1, appliedEvents, "a retry must not duplicate the transition event")
+}
+
+// An inline candidate the engine can only call needs_review must not be
+// silently attached to its ambiguous guess: that is exactly the guess
+// IngestPostings refuses to make for the same verdict.
+func TestRecordApplication_AmbiguousInlineCandidateCreatesNewPosting(t *testing.T) {
+	svc, principal := newService(t)
+	ctx := t.Context()
+
+	_, err := svc.IngestPostings(ctx, principal, service.IngestRequest{
+		Candidates: []domain.Candidate{greenhouseCandidate("1111111", "Senior Software Engineer")},
+	})
+	require.NoError(t, err)
+
+	applied, err := svc.RecordApplication(ctx, principal, service.RecordApplicationRequest{
+		Candidate: &domain.Candidate{
+			URL: "https://acme.com/careers/payments", Title: "Senior Software Engineer, Payments",
+			Company: "Acme", Location: "Remote",
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, domain.StatusApplied, applied.Status)
+
+	all, err := svc.ListApplications(ctx, principal, store.ApplicationListFilter{Limit: 10})
+	require.NoError(t, err)
+	assert.Len(t, all, 2, "a needs_review candidate must become its own posting, not attach to the ambiguous one")
+}

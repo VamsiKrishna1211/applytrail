@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -18,21 +19,34 @@ import (
 // It also adds the key's identity to the log fields, so every later line in
 // the request carries which credential made it: that is the audit trail when
 // several agents share one deployment.
-func authenticate(authenticator auth.Authenticator, failures ratelimit.Limiter) func(http.Handler) http.Handler {
+func authenticate(authenticator auth.Authenticator, failures ratelimit.Limiter, wwwAuthenticate string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			principal, err := authenticator.Authenticate(r.Context(), r)
 			if err != nil {
-				if retryAfter, ok := authFailureExhausted(r, failures); ok {
-					w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())))
-					writeError(w, r, fmt.Errorf("%w: too many failed authentication attempts", domain.ErrRateLimited))
+				// The budget exists to slow down credential guessing, so it
+				// must only be spent on a genuine bad-credential rejection
+				// (wraps ErrUnauthenticated). Authenticate can also fail with
+				// a plain backend error — a database outage, say — and that
+				// must reach the caller as the 500 it is, not be converted
+				// into a 429 by a check that thinks it is one more guess.
+				if errors.Is(err, domain.ErrUnauthenticated) {
+					if retryAfter, ok := authFailureExhausted(r, failures); ok {
+						w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())))
+						writeError(w, r, fmt.Errorf("%w: too many failed authentication attempts", domain.ErrRateLimited))
+						return
+					}
+				}
+				// The identity provider did not answer. The credential may be
+				// fine, so this is a retry, not a challenge to re-authenticate.
+				if errors.Is(err, domain.ErrUnavailable) {
+					w.Header().Set("Retry-After", "5")
+					writeError(w, r, err)
 					return
 				}
-				// Advertise both accepted schemes so a client knows what to
-				// send. The api_key challenge is what stops a spec-aware MCP
-				// client reading the bare Bearer challenge as an invitation to
-				// start an OAuth flow this server does not implement.
-				w.Header().Set("WWW-Authenticate", `Bearer realm="applytrail", api_key realm="applytrail"`)
+				// Advertise the accepted schemes so a client knows what to
+				// send; see challenge for why the value differs with OAuth on.
+				w.Header().Set("WWW-Authenticate", wwwAuthenticate)
 				writeError(w, r, err)
 				return
 			}
@@ -88,9 +102,12 @@ func rateLimit(limiter ratelimit.Limiter) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			principal, ok := auth.PrincipalFromContext(r.Context())
 			if !ok {
-				// Unauthenticated requests never reach here; if one does, the
-				// safe response is to let the auth middleware reject it.
-				next.ServeHTTP(w, r)
+				// Every mount point puts authenticate() ahead of this
+				// middleware, so a missing principal here should never
+				// happen. Failing closed rather than passing the request
+				// through unlimited is what keeps that true even if a future
+				// route is wired in the wrong order.
+				writeError(w, r, fmt.Errorf("%w: no credential on request", domain.ErrUnauthenticated))
 				return
 			}
 
